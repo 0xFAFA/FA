@@ -1,0 +1,27 @@
+
+# ------ root_path/dataset_name ------
+root_path: "/home/enroll2024/xinhua/Datasets"
+
+
+# ------ Hyperparamters ------
+
+img_feature_alpha: 0.5
+text_feature_alpha: 0.5
+
+
+seed: 1
+
+# ------ Basic Config ------
+id_dataset: 'imagenet'
+
+ood_dataset: 'Places'
+ood_dataset_path: '/home/enroll2024/xinhua/Datasets/Places/images'
+# ood dataset [iNaturalist  Places SUN ]
+
+shots: 1
+backbone: 'ViT-B/16'
+# RN50 or ViT-B/16 or ViT-B/32
+
+lr: 0.0002 #0.0002
+fine_tune_train_epoch: 200
+fine_tune_batch_size: 250

@@ -1,0 +1,69 @@
+
+
+# ------ root_path ------
+root_path: "/home/enroll2024/xinhua/Datasets"
+# root_path: "/home/enroll2024/xinhua/Datasets/Skin_OOD/SDB198"
+
+ood_dataset_path: "/home/enroll2024/xinhua/Datasets"
+# ood_dataset_path: "/home/enroll2024/xinhua/Datasets/Skin_OOD/SDB198/42+156"
+# ood_dataset_path: "/home/enroll2024/xinhua/Datasets/Skin_OOD/SDB198/102+96"
+
+
+# ------ id dataset------
+# id_dataset: 'NCT-CRC-HE-100K'
+# id_dataset: 'LC25000'
+# id_dataset: 'SD198'
+# id_dataset: '42+156'
+# id_dataset: '102+96'
+# id_dataset: 'TCGA12'
+
+# id_dataset: 'imagenet100'
+# id_dataset: 'dtd' 
+# id_dataset: 'food101'  
+# id_dataset: 'stanford_cars' 
+# id_dataset: 'caltech101' 
+# id_dataset: 'oxford_flowers'
+# id_dataset: 'oxford_pets'
+
+id_dataset: 'imagenet'  
+# id_dataset: 'eurosat'
+# id_dataset: 'fgvc'
+# id_dataset: 'ucf101'
+
+#------ ood_dataset ------
+# ood_dataset: 'NCT-CRC-HE-100K'
+# ood_dataset: 'SD198'
+# ood_dataset: 'LC25000'
+# ood_dataset: 'ood'
+
+# ood_dataset: 'SUN'
+# ood_dataset: 'iNaturalist'
+# ood_dataset: 'Places'
+# ood_dataset: 'dtd'
+# ood_dataset: 'OpenImage_O'
+# ood_dataset: 'NINCO'
+# ood_dataset: 'Imagenet-o'
+# ood_dataset: 'ssb_hard'
+
+ood_dataset: 'common'
+# ood_dataset: 'challenging'
+# ood_dataset: 'nearood'
+# ood_dataset: 'all'
+
+
+
+# ------ Hyperparamters ------
+img_feature_alpha: 0.0
+text_feature_alpha: 1.0
+
+seed: 5
+
+shots: 16
+backbone: 'ViT-B/16'
+# RN50 or ViT-B/16 or ViT-B/32
+
+lr: 0.0002 # 0.001  
+fine_tune_train_epoch: 200  # 100
+fine_tune_batch_size: 256  # 160 100
+
+test_batch_size: 300

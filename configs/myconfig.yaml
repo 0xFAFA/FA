@@ -1,0 +1,34 @@
+
+# ------ root_path/dataset_name ------
+root_path: '/data/Public/Datasets/'
+
+
+
+# ------ Hyperparamters ------
+search_hp: True
+# search_hp: False
+
+search_scale: [7, 3]
+search_step: [200, 20]
+
+img_feature_alpha: 0.5
+text_feature_alpha: 0.5
+
+
+mlp_block_num: 0
+seed: 1
+
+# ------ Basic Config ------
+dataset: 'imagenet'
+contrast_learning_episode: 1000
+contrast_learning_way: 10
+contrast_learning_batch_size: 1 # fixed
+
+shots: 1
+backbone: 'ViT-B/16'
+# RN50 or ViT-B/16 or ViT-B/32
+
+lr: 0.0002 #0.0002
+fine_tune_train_epoch: 200
+fine_tune_batch_size: 250
+
