@@ -1,6 +1,6 @@
 import os
 import sys
-os.environ["CUDA_VISIBLE_DEVICES"] = '4'
+os.environ["CUDA_VISIBLE_DEVICES"] = '6'
 
 import random
 import argparse
@@ -213,11 +213,13 @@ class CustomCLIP(nn.Module):
 
         affinity = self.tip_adapter(image_features)
         # logits_cache_forced = ((-1) * (cache_beta - cache_beta * affinity)).exp() @ self.cache_values
-        logits_cache_forced = ((-1) * (cache_beta - cache_beta * affinity)).exp() @ self.cache_values_forced
+        # logits_cache_forced = ((-1) * (cache_beta - cache_beta * affinity)).exp() @ self.cache_values_forced
+        logits_cache_forced = affinity @ self.cache_values_forced  # 直接用所得相似度（键）去乘以对应值
 
         affinity_local = self.tip_adapter(local_image_features)
         # logits_cache_local_forced = ((-1) * (cache_beta - cache_beta * affinity_local)).exp() @ self.cache_values
-        logits_cache_local_forced = ((-1) * (cache_beta - cache_beta * affinity_local)).exp() @ self.cache_values_forced
+        # logits_cache_local_forced = ((-1) * (cache_beta - cache_beta * affinity_local)).exp() @ self.cache_values_forced
+        logits_cache_local_forced = affinity_local @ self.cache_values_forced
 
         if self.origin_neutral_repeat_num > 0:
             # cache_keys_origin = self.cache_keys
@@ -225,13 +227,15 @@ class CustomCLIP(nn.Module):
 
             affinity_origin = image_features @ cache_keys_origin.T
             # logits_cache_origin = ((-1) * (cache_beta - cache_beta * affinity_origin)).exp() @ self.cache_values
-            logits_cache_origin = ((-1) * (cache_beta - cache_beta * affinity_origin)).exp() @ self.cache_values_original
+            # logits_cache_origin = ((-1) * (cache_beta - cache_beta * affinity_origin)).exp() @ self.cache_values_original
+            logits_cache_origin = affinity_origin @ self.cache_values_original   
             logits_cache_origin = logits_cache_origin.repeat(1, self.origin_neutral_repeat_num)
             logits_cache_forced = torch.cat((logits_cache_forced, logits_cache_origin), dim=1)
 
             affinity_local_origin = local_image_features @ cache_keys_origin.T
             # logits_cache_local_origin = ((-1) * (cache_beta - cache_beta * affinity_local_origin)).exp() @ self.cache_values
-            logits_cache_local_origin = ((-1) * (cache_beta - cache_beta * affinity_local_origin)).exp() @ self.cache_values_original
+            # logits_cache_local_origin = ((-1) * (cache_beta - cache_beta * affinity_local_origin)).exp() @ self.cache_values_original
+            logits_cache_local_origin = affinity_local_origin @ self.cache_values_original
             logits_cache_local_origin = logits_cache_local_origin.repeat(1, 1, self.origin_neutral_repeat_num)
             logits_cache_local_forced = torch.cat((logits_cache_local_forced, logits_cache_local_origin), dim=2)
 
@@ -277,6 +281,9 @@ def extract_cache_image_feature(cfg, clip_model, train_data_loader, type_str):
 
 
     return
+
+
+
 
 
 
@@ -335,11 +342,11 @@ def main():
     is_train = 0
     is_extract_feature = 0
 
-    model_name = 'fa_taskres_tipadapter'
+    model_name = 'fa_taskres_tipadapter_change'
     lrname_taskres = str(cfg['taskres_lr']).replace('.','')
     lrname_tipadapter = str(cfg['tipadapter_lr']).replace('.','')
 
-    cache_dir = os.path.join('./mycaches_new', cfg['id_dataset'], model_file_name_dict[cfg['backbone']], str(cfg['shots'])+'shots', model_name, f'ep_taskres{cfg["taskres_train_epoch"]}_tipadapter{cfg["tipadapter_train_epoch"]}', 'trainHtrm_fcacheHtrm_ocacheblur3Htrm','neutral_len'+str(origin_neutral_multiply_factor), f'lr_taskres{lrname_taskres}_tipadapter{lrname_tipadapter}','seed'+str(cfg['seed'])  )  #   
+    cache_dir = os.path.join('./mycaches_new', cfg['id_dataset'], model_file_name_dict[cfg['backbone']], str(cfg['shots'])+'shots', model_name, f'ep_taskres{cfg["taskres_train_epoch"]}_tipadapter{cfg["tipadapter_train_epoch"]}', 'trainMtrm_fcacheMtrm_ocacheblurtrm','neutral_len'+str(origin_neutral_multiply_factor), f'lr_taskres{lrname_taskres}_tipadapter{lrname_tipadapter}','seed'+str(cfg['seed'])  )  #   
 
     os.makedirs(cache_dir, exist_ok=True)
     cfg['cache_dir'] = cache_dir
@@ -382,24 +389,9 @@ def main():
         transforms.RandomHorizontalFlip(p=0.5),
     
         # transforms.RandomApply([
-        #     transforms.GaussianBlur(kernel_size=15, sigma=(2.0, 7.0))
+        #     transforms.GaussianBlur(kernel_size=5, sigma=1.0)
         # ], p=0.5),  # 50% 概率应用模糊
         transforms.GaussianBlur(kernel_size=15, sigma=(2.0, 7.0)),
-
-        transforms.ToTensor(),
-        transforms.Normalize(mean=(0.48145466, 0.4578275, 0.40821073), std=(0.26862954, 0.26130258, 0.27577711))
-    ])
-
-    transform_aug_blur_H = transforms.Compose([
-        transforms.RandomResizedCrop(size=224, scale=(0.8, 1), interpolation=transforms.InterpolationMode.BICUBIC),
-        transforms.RandomHorizontalFlip(p=0.5),
-        transforms.RandomVerticalFlip(p=0.5),
-        transforms.RandomRotation(degrees=5),
-        transforms.ColorJitter(brightness=0.15, contrast=0.1, saturation=0.1),
-        transforms.RandomGrayscale(p=0.1),
-    
-
-        transforms.GaussianBlur(kernel_size=15, sigma=(2.0, 15.0)),
 
         transforms.ToTensor(),
         transforms.Normalize(mean=(0.48145466, 0.4578275, 0.40821073), std=(0.26862954, 0.26130258, 0.27577711))
@@ -408,9 +400,9 @@ def main():
     # train_transform_aug = preprocess
     train_transform_no_aug = preprocess
 
-    train_transform = transform_aug_H
-    cache_transform_forced = transform_aug_H
-    cache_transform_original = transform_aug_blur_H
+    train_transform = transform_aug_M
+    cache_transform_forced = transform_aug_M
+    cache_transform_original = transform_aug_blur
 
 
 
@@ -515,15 +507,13 @@ def main():
 
         # for taskres
         optimizer_taskres = torch.optim.Adam([model_stage2.module.residual_learner_text], lr=cfg['taskres_lr'], weight_decay=5e-4, eps=1e-5)
-        # optimizer_taskres = torch.optim.SGD([model_stage2.module.residual_learner_text], lr=cfg['taskres_lr'], weight_decay=5e-4, momentum=0.9, dampening=0, nesterov=False)
         scheduler_taskres = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer_taskres,  cfg['taskres_train_epoch'] * len(train_loader))
         print('optimizer_taskres:', optimizer_taskres)
         print('scheduler_taskres:', scheduler_taskres)
 
 
         # for tipadapter
-        optimizer_tipadapter = torch.optim.AdamW(model_stage2.module.tip_adapter.parameters(), lr=cfg['tipadapter_lr'], weight_decay=5e-4, eps=1e-4)  #
-        # optimizer_tipadapter = torch.optim.SGD(model_stage2.module.tip_adapter.parameters(), lr=cfg['tipadapter_lr'], weight_decay=5e-4, momentum=0.9, dampening=0, nesterov=False) 
+        optimizer_tipadapter = torch.optim.AdamW(model_stage2.module.tip_adapter.parameters(), lr=cfg['tipadapter_lr'], eps=1e-4) 
         scheduler_tipadapter = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer_tipadapter,  cfg['tipadapter_train_epoch'] * len(train_loader))
         print('optimizer_tipadapter:', optimizer_tipadapter)
         print('scheduler_tipadapter:', scheduler_tipadapter)

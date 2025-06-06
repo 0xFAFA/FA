@@ -1,4 +1,5 @@
 
+
 # ------ root_path ------
 root_path: "/home/enroll2024/xinhua/Datasets"
 # root_path: "/home/enroll2024/xinhua/Datasets/Skin_OOD/SDB198"
@@ -50,16 +51,27 @@ ood_dataset: 'common'
 # ood_dataset: 'all'
 
 
-
-# ------ Hyperparamters ------
 seed: 5
 
 shots: 16
+# split_cache_batch_size: 16
 backbone: 'ViT-B/16'
 # RN50 or ViT-B/16 or ViT-B/32
 
-lr: 0.002 # 0.0002  0.02 0.002
-fine_tune_train_epoch: 30  # 200 30
-fine_tune_batch_size: 320  # 160 100
 
-test_batch_size: 400
+# coop
+coop_lr: 0.002 # 0.0002  0.02 0.002
+coop_train_poch: 50  # 200 30
+
+
+# tipadapter
+cache_beta: 1.0  # 1.0
+cache_alpha: 1.0  # 1.17
+augment_epoch: 10
+tipadapter_lr: 0.001
+tipadapter_train_epoch: 100
+
+
+
+fine_tune_batch_size: 160  # 160 100
+test_batch_size: 350

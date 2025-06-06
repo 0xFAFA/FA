@@ -54,7 +54,7 @@ ood_dataset: 'common'
 seed: 5
 
 shots: 16
-split_cache_batch_size: 16
+# split_cache_batch_size: 16
 backbone: 'ViT-B/16'
 # RN50 or ViT-B/16 or ViT-B/32
 
@@ -62,7 +62,7 @@ backbone: 'ViT-B/16'
 img_feature_alpha: 0.0
 text_feature_alpha: 1.0
 taskres_lr: 0.0002
-taskres_train_epoch: 200
+taskres_train_epoch: 100
 
 
 # tipadapter
@@ -70,9 +70,9 @@ cache_beta: 1.0  # 1.0
 cache_alpha: 1.0  # 1.17
 augment_epoch: 10
 tipadapter_lr: 0.001
-tipadapter_train_epoch: 20
+tipadapter_train_epoch: 100
 
 
 
-fine_tune_batch_size: 256  # 160 100
+fine_tune_batch_size: 300  # 160 100
 test_batch_size: 350

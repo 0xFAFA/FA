@@ -1,6 +1,6 @@
 import os
 import sys
-os.environ["CUDA_VISIBLE_DEVICES"] = '4'
+os.environ["CUDA_VISIBLE_DEVICES"] = '3'
 
 import random
 import argparse
@@ -239,10 +239,10 @@ class CustomCLIP(nn.Module):
         logits_cache_local = logits_cache_local_forced
 
 
-        logits = logits_text + self.cfg['cache_alpha'] * logits_cache
-        logits_local = logits_local_text + self.cfg['cache_alpha'] * logits_cache_local #
+        # logits = logits_text + self.cfg['cache_alpha'] * logits_cache
+        # logits_local = logits_local_text + self.cfg['cache_alpha'] * logits_cache_local #
 
-        return logits, logits_local
+        return logits_text, logits_local_text, logits_cache, logits_cache_local
 
 
 def extract_cache_image_feature(cfg, clip_model, train_data_loader, type_str):
@@ -277,6 +277,9 @@ def extract_cache_image_feature(cfg, clip_model, train_data_loader, type_str):
 
 
     return
+
+
+
 
 
 
@@ -339,7 +342,7 @@ def main():
     lrname_taskres = str(cfg['taskres_lr']).replace('.','')
     lrname_tipadapter = str(cfg['tipadapter_lr']).replace('.','')
 
-    cache_dir = os.path.join('./mycaches_new', cfg['id_dataset'], model_file_name_dict[cfg['backbone']], str(cfg['shots'])+'shots', model_name, f'ep_taskres{cfg["taskres_train_epoch"]}_tipadapter{cfg["tipadapter_train_epoch"]}', 'trainHtrm_fcacheHtrm_ocacheblur3Htrm','neutral_len'+str(origin_neutral_multiply_factor), f'lr_taskres{lrname_taskres}_tipadapter{lrname_tipadapter}','seed'+str(cfg['seed'])  )  #   
+    cache_dir = os.path.join('./mycaches_new', cfg['id_dataset'], model_file_name_dict[cfg['backbone']], str(cfg['shots'])+'shots', model_name, f'ep_taskres{cfg["taskres_train_epoch"]}_tipadapter{cfg["tipadapter_train_epoch"]}', 'trainMtrm_fcacheMtrm_ocacheblurtrm','neutral_len'+str(origin_neutral_multiply_factor), f'lr_taskres{lrname_taskres}_tipadapter{lrname_tipadapter}','seed'+str(cfg['seed'])  )  #   
 
     os.makedirs(cache_dir, exist_ok=True)
     cfg['cache_dir'] = cache_dir
@@ -399,7 +402,7 @@ def main():
         transforms.RandomGrayscale(p=0.1),
     
 
-        transforms.GaussianBlur(kernel_size=15, sigma=(2.0, 15.0)),
+        transforms.GaussianBlur(kernel_size=15, sigma=(2.0, 7.0)),
 
         transforms.ToTensor(),
         transforms.Normalize(mean=(0.48145466, 0.4578275, 0.40821073), std=(0.26862954, 0.26130258, 0.27577711))
@@ -408,9 +411,9 @@ def main():
     # train_transform_aug = preprocess
     train_transform_no_aug = preprocess
 
-    train_transform = transform_aug_H
-    cache_transform_forced = transform_aug_H
-    cache_transform_original = transform_aug_blur_H
+    train_transform = transform_aug_M
+    cache_transform_forced = transform_aug_M
+    cache_transform_original = transform_aug_blur
 
 
 
@@ -522,8 +525,8 @@ def main():
 
 
         # for tipadapter
-        optimizer_tipadapter = torch.optim.AdamW(model_stage2.module.tip_adapter.parameters(), lr=cfg['tipadapter_lr'], weight_decay=5e-4, eps=1e-4)  #
-        # optimizer_tipadapter = torch.optim.SGD(model_stage2.module.tip_adapter.parameters(), lr=cfg['tipadapter_lr'], weight_decay=5e-4, momentum=0.9, dampening=0, nesterov=False) 
+        optimizer_tipadapter = torch.optim.AdamW(model_stage2.module.tip_adapter.parameters(), lr=cfg['tipadapter_lr'], weight_decay=5e-4, eps=1e-4) 
+        # optimizer_tipadapter = torch.optim.SGD(model_stage2.module.tip_adapter.parameters(), lr=cfg['tipadapter_lr'], momentum=0.9, dampening=0, nesterov=False) 
         scheduler_tipadapter = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer_tipadapter,  cfg['tipadapter_train_epoch'] * len(train_loader))
         print('optimizer_tipadapter:', optimizer_tipadapter)
         print('scheduler_tipadapter:', scheduler_tipadapter)
@@ -542,8 +545,11 @@ def main():
             for i, (images, target) in enumerate(tqdm(train_loader)):
                 images, target = images.cuda(), target.cuda()
 
-                logits,_ = model_stage2(images)
-                loss = criterion(logits, target)
+                logits_text,_,logits_cache,_ = model_stage2(images)
+
+                logits = logits_text + cfg['cache_alpha'] * logits_cache
+                loss= criterion(logits, target)
+
                 acc = cls_acc(output=logits , target=target, topk=1)
 
                 correct_samples += acc / 100 * len(logits)
@@ -583,15 +589,20 @@ def main():
 
                     for images, labels in tqdm(test_loader):
                         images, labels = images.to(device), labels.to(device)
-                        outputs,_ = model_stage2(images)
+                        logits_text,_,logits_cache,_ = model_stage2(images)
 
-                        outputs = outputs / 100.0
-                        batch_size, repeat_len = outputs.shape
-                        outputs_temp = outputs.view(batch_size, cfg['origin_neutral_multiply_factor']+1 , len(cfg['classnames']))
-                        just_origin_outputs = outputs_temp[:,0,:]
+                        logits_text = logits_text / 100.0
+                        logits_cache = logits_cache / 100.0
+                        batch_size, repeat_len = logits_text.shape
+                        logits_text_temp = logits_text.view(batch_size, cfg['origin_neutral_multiply_factor']+1 , len(cfg['classnames']))
+                        logits_cache_temp = logits_cache.view(batch_size, cfg['origin_neutral_multiply_factor']+1 , len(cfg['classnames']))
+                        just_origin_logits_text = logits_text_temp[:,0,:]
+                        just_origin_logits_cache = logits_cache_temp[:,0,:]
+
+                        just_origin_logits = just_origin_logits_text + cfg['cache_alpha'] * just_origin_logits_cache
 
 
-                        pred = just_origin_outputs.topk(topk, 1, True, True)[1].t()
+                        pred = just_origin_logits.topk(topk, 1, True, True)[1].t()
                         correct = pred.eq(labels.view(1, -1).expand_as(pred))
                         acc_num = float(correct[: topk].reshape(-1).float().sum(0, keepdim=True).cpu().numpy())
                         correct_samples += acc_num
@@ -616,7 +627,7 @@ def main():
         elif cfg['ood_dataset'] == 'nearood':
             test_file_name = 'log_test_ood_nearood.txt'
         elif cfg['ood_dataset'] == 'common':
-            test_file_name = 'log_test_ood_common.txt'
+            test_file_name = 'log_test_ood_common_splitscore_alpha0_5.txt'
         else:
             test_file_name = f'log_test_ood_{cfg["ood_dataset"]}.txt'
         sys.stdout = Logger( os.path.join(cache_dir, test_file_name) ,  stream=sys.stdout)
@@ -713,16 +724,33 @@ def main():
             T = 1.0
 
             # logit_result
-            id_conf = np.array([])
-            id_conf_gl = np.array([])
+            id_conf_before = np.array([])
+            id_conf_gl_before = np.array([])
+
+            id_conf_text = np.array([])
+            id_conf_gl_text = np.array([])
+
+            id_conf_cache = np.array([])
+            id_conf_gl_cache = np.array([])
+
+            id_conf_splitscore = np.array([])
+            id_conf_gl_splitscore = np.array([])
 
             # run id dataset
             for images, labels in tqdm(test_loader_id):
                 images, labels = images.to(device), labels.to(device)
 
-                logits_id, logits_id_local = model_stage2(images)
+                logits_id_text, logits_id_local_text, logits_id_cache, logits_id_local_cache  = model_stage2(images)
+                
+                logits_id = logits_id_text + cfg['cache_alpha'] * logits_id_cache
+                logits_id_local = logits_id_local_text + cfg['cache_alpha'] * logits_id_local_cache
                 logits_id /= 100.0
                 logits_id_local /= 100.0
+                
+                logits_id_text /= 100.0
+                logits_id_local_text /= 100.0
+                logits_id_cache /= 100.0
+                logits_id_local_cache /= 100.0
                 # print(logits_id.shape) # torch.Size([200, 3000])
                 # print(logits_id_local.shape) # torch.Size([200, 196, 3000])
 
@@ -731,31 +759,70 @@ def main():
                 batch_size, token_len, repeat_len = logits_id_local.shape
                 logits_id_temp = logits_id.view(batch_size, cfg['origin_neutral_multiply_factor']+1 , len(cfg['classnames']))
                 just_origin_logits_id = logits_id_temp[:,0,:]
-                # print(just_origin_logits_id.shape) # torch.Size([200, 1000])
-                # print(just_origin_logits_id[0,:10])
 
-                # print(logits_id_temp[0,1,:10]) #
-                # print(logits_id_temp[0,2,:10]) # the same
+
 
                 logits_id_local_temp = logits_id_local.view(batch_size, token_len, cfg['origin_neutral_multiply_factor']+1 , len(cfg['classnames']))
                 just_origin_logits_id_local = logits_id_local_temp[:,:,0,:]
-                # ----
 
 
 
-                smax_global = F.softmax(logits_id/T, dim=-1)
-                smax_global = smax_global.cpu().numpy()
-                smax_global = smax_global[:, :len(cfg['classnames'])]  # 只取forced
-                mcm_global_score = np.max(smax_global, axis=1)
+                # 算before score
+                smax_global_before = F.softmax(logits_id / T, dim=-1)
+                smax_global_before = smax_global_before.cpu().numpy()
+                smax_global_before = smax_global_before[:, :len(cfg['classnames'])]  # 只取forced
+                mcm_global_score_before = np.max(smax_global_before, axis=1)
 
-                smax_local = F.softmax(logits_id_local/T, dim=-1)
-                smax_local = smax_local.cpu().numpy()
-                smax_local = smax_local[:, :, :len(cfg['classnames'])]  # 只取forced
-                mcm_local_score = np.max(smax_local, axis=(1, 2))
+                smax_local_before = F.softmax(logits_id_local / T, dim=-1)
+                smax_local_before = smax_local_before.cpu().numpy()
+                smax_local_before = smax_local_before[:, :, :len(cfg['classnames'])]  # 只取forced
+                mcm_local_score_before = np.max(smax_local_before, axis=(1, 2))
+
+                id_conf_before = np.concatenate((id_conf_before, mcm_global_score_before))
+                id_conf_gl_before = np.concatenate((id_conf_gl_before, mcm_global_score_before + mcm_local_score_before))
+
+
+
+                # 算text score
+                smax_global_text = F.softmax(logits_id_text/T, dim=-1)
+                smax_global_text = smax_global_text.cpu().numpy()
+                smax_global_text = smax_global_text[:, :len(cfg['classnames'])]  # 只取forced
+                mcm_global_score_text = np.max(smax_global_text, axis=1)
+
+
+                smax_local_text = F.softmax(logits_id_local_text/T, dim=-1)
+                smax_local_text = smax_local_text.cpu().numpy()
+                smax_local_text = smax_local_text[:, :, :len(cfg['classnames'])]  # 只取forced
+                mcm_local_score_text = np.max(smax_local_text, axis=(1, 2))
                 # print(logits_id.size)
 
-                id_conf = np.concatenate((id_conf, mcm_global_score))
-                id_conf_gl = np.concatenate((id_conf_gl, mcm_global_score + mcm_local_score))
+                id_conf_text = np.concatenate((id_conf_text, mcm_global_score_text))
+                id_conf_gl_text = np.concatenate((id_conf_gl_text, mcm_global_score_text + mcm_local_score_text))
+
+
+                # 算cache score
+                smax_global_cache = F.softmax(logits_id_cache/T, dim=-1)
+                smax_global_cache = smax_global_cache.cpu().numpy()
+                smax_global_cache = smax_global_cache[:, :len(cfg['classnames'])]  # 只取forced
+                mcm_global_score_cache = np.max(smax_global_cache, axis=1)
+
+                smax_local_cache = F.softmax(logits_id_local_cache/T, dim=-1)
+                smax_local_cache = smax_local_cache.cpu().numpy()
+                smax_local_cache = smax_local_cache[:, :, :len(cfg['classnames'])]  # 只取forced
+                mcm_local_score_cache = np.max(smax_local_cache, axis=(1, 2))
+
+                id_conf_cache = np.concatenate((id_conf_cache, mcm_global_score_cache))
+                id_conf_gl_cache = np.concatenate((id_conf_gl_cache, mcm_global_score_cache + mcm_local_score_cache))
+
+
+                # 算split score
+                mcm_global_score_splitscore = mcm_global_score_text + cfg['cache_alpha'] * mcm_global_score_cache
+                mcm_local_score_splitscore = mcm_local_score_text + cfg['cache_alpha'] * mcm_local_score_cache
+
+                id_conf_splitscore = np.concatenate((id_conf_splitscore, mcm_global_score_splitscore))
+                id_conf_gl_splitscore = np.concatenate((id_conf_gl_splitscore, mcm_global_score_splitscore + mcm_local_score_splitscore))
+
+
 
 
                 # caculate accuracy
@@ -782,13 +849,33 @@ def main():
             # run ood dataset
 
             # avarage ood 
-            avg_auroc, avg_aupr, avg_fpr = 0.0, 0.0, 0.0
-            avg_auroc_gl, avg_aupr_gl, avg_fpr_gl = 0.0, 0.0, 0.0
+            avg_auroc_before, avg_aupr_before, avg_fpr_before = 0.0, 0.0, 0.0
+            avg_auroc_gl_before, avg_aupr_gl_before, avg_fpr_gl_before = 0.0, 0.0, 0.0
+
+            avg_auroc_text, avg_aupr_text, avg_fpr_text = 0.0, 0.0, 0.0
+            avg_auroc_gl_text, avg_aupr_gl_text, avg_fpr_gl_text = 0.0, 0.0, 0.0
+
+            avg_auroc_cache, avg_aupr_cache, avg_fpr_cache = 0.0, 0.0, 0.0
+            avg_auroc_gl_cache, avg_aupr_gl_cache, avg_fpr_gl_cache = 0.0, 0.0, 0.0
+
+            avg_auroc_splitscore, avg_aupr_splitscore, avg_fpr_splitscore = 0.0, 0.0, 0.0
+            avg_auroc_gl_splitscore, avg_aupr_gl_splitscore, avg_fpr_gl_splitscore = 0.0, 0.0, 0.0
 
             for cur_ood_dataset in ood_dataset_name:
+                print('--------')
                 print(f'cur ood dataset: {cur_ood_dataset}')
-                ood_conf = np.array([])
-                ood_conf_gl = np.array([])
+
+                ood_conf_before = np.array([])
+                ood_conf_gl_before = np.array([])
+
+                ood_conf_text = np.array([])
+                ood_conf_gl_text = np.array([])
+
+                ood_conf_cache = np.array([])
+                ood_conf_gl_cache = np.array([])
+
+                ood_conf_splitscore = np.array([])
+                ood_conf_gl_splitscore = np.array([])
 
                 if  cur_ood_dataset == 'ood':
                     ood_dataset = datasets.ImageFolder(root=os.path.join(cfg['ood_dataset_path'], cur_ood_dataset), transform=train_transform_no_aug)
@@ -812,61 +899,183 @@ def main():
                 for images, _ in tqdm(ood_loader):
                     images = images.to(device)
 
-                    logits_ood, logits_ood_local = model_stage2(images)
+                    logits_ood_text, logits_ood_local_text, logits_ood_cache, logits_ood_local_cache = model_stage2(images)
+                    logits_ood = logits_ood_text + cfg['cache_alpha'] * logits_ood_cache
+                    logits_ood_local = logits_ood_local_text + cfg['cache_alpha'] * logits_ood_local_cache
                     logits_ood /= 100.0
                     logits_ood_local /= 100.0
+
+                    logits_ood_text /= 100.0
+                    logits_ood_local_text /= 100.0
+                    logits_ood_cache /= 100.0
+                    logits_ood_local_cache /= 100.0
                     # print(logits_ood.shape)
                     # print(logits_ood_local.shape)
 
+                    # 算before score
+                    smax_global_before = F.softmax(logits_ood / T, dim=-1)
+                    smax_global_before = smax_global_before.cpu().numpy()
+                    smax_global_before = smax_global_before[:, :len(cfg['classnames'])] # 只取forced
+                    mcm_global_score_before = np.max(smax_global_before, axis=1)
+
+                    smax_local_before = F.softmax(logits_ood_local / T, dim=-1)
+                    smax_local_before = smax_local_before.cpu().numpy()
+                    smax_local_before = smax_local_before[:, :, :len(cfg['classnames'])]  # 只取forced
+                    mcm_local_score_before = np.max(smax_local_before, axis=(1, 2))
+
+                    ood_conf_before = np.concatenate((ood_conf_before, mcm_global_score_before))
+                    ood_conf_gl_before = np.concatenate((ood_conf_gl_before, mcm_global_score_before + mcm_local_score_before))
+
+
                     
+                    # 算text score
+                    smax_global_text = F.softmax(logits_ood_text/T, dim=-1)
+                    smax_global_text = smax_global_text.cpu().numpy()
+                    smax_global_text = smax_global_text[:, :len(cfg['classnames'])]  # 只取forced
+                    mcm_global_score_text = np.max(smax_global_text, axis=1)
 
-                    smax_global = F.softmax(logits_ood/T, dim=-1)
-                    smax_global = smax_global.cpu().numpy()
-                    smax_global = smax_global[:, :len(cfg['classnames'])]  # 只取forced
-                    mcm_global_score = np.max(smax_global, axis=1)
-
-                    smax_local = F.softmax(logits_ood_local/T, dim=-1)
-                    smax_local = smax_local.cpu().numpy()
-                    smax_local = smax_local[:, :, :len(cfg['classnames'])]  # 只取forced
-                    mcm_local_score = np.max(smax_local, axis=(1, 2))
+                    smax_local_text = F.softmax(logits_ood_local_text/T, dim=-1)
+                    smax_local_text = smax_local_text.cpu().numpy()
+                    smax_local_text = smax_local_text[:, :, :len(cfg['classnames'])]  # 只取forced
+                    mcm_local_score_text = np.max(smax_local_text, axis=(1, 2))
                     # print(logits_ood.size)
 
-                    ood_conf = np.concatenate((ood_conf, mcm_global_score))
-                    ood_conf_gl = np.concatenate((ood_conf_gl, mcm_global_score + mcm_local_score))
+                    ood_conf_text = np.concatenate((ood_conf_text, mcm_global_score_text))
+                    ood_conf_gl_text = np.concatenate((ood_conf_gl_text, mcm_global_score_text + mcm_local_score_text))
 
 
-                print('id_conf size',id_conf.size)
-                print('ood_conf size',ood_conf.size)
+
+                    # 算cache score
+                    smax_global_cache = F.softmax(logits_ood_cache/T, dim=-1)
+                    smax_global_cache = smax_global_cache.cpu().numpy()
+                    smax_global_cache = smax_global_cache[:, :len(cfg['classnames'])]  # 只取forced
+                    mcm_global_score_cache = np.max(smax_global_cache, axis=1)
+
+                    smax_local_cache = F.softmax(logits_ood_local_cache/T, dim=-1)
+                    smax_local_cache = smax_local_cache.cpu().numpy()
+                    smax_local_cache = smax_local_cache[:, :, :len(cfg['classnames'])]  # 只取forced
+                    mcm_local_score_cache = np.max(smax_local_cache, axis=(1, 2))
+
+                    ood_conf_cache = np.concatenate((ood_conf_cache, mcm_global_score_cache))
+                    ood_conf_gl_cache = np.concatenate((ood_conf_gl_cache, mcm_global_score_cache + mcm_local_score_cache))
+
+
+                    # 算split score
+                    mcm_global_score_splitscore = mcm_global_score_text + cfg['cache_alpha'] * mcm_global_score_cache
+                    mcm_local_score_splitscore = mcm_local_score_text + cfg['cache_alpha'] * mcm_local_score_cache
+
+                    ood_conf_splitscore = np.concatenate((ood_conf_splitscore, mcm_global_score_splitscore))
+                    ood_conf_gl_splitscore = np.concatenate((ood_conf_gl_splitscore, mcm_global_score_splitscore + mcm_local_score_splitscore))
+
+
+                print('id_conf size',id_conf_splitscore.size)
+                print('ood_conf size',ood_conf_splitscore.size)
 
 
                 # ood detection
                 tpr = 0.95
 
 
+                # 算before score
+                auroc_before, aupr_before, fpr_before = get_measures(id_conf_before, ood_conf_before, tpr)
+                avg_auroc_before += auroc_before
+                avg_aupr_before += aupr_before
+                avg_fpr_before += fpr_before
+                print(f'AUROC_before: {auroc_before:.4f}, AUPR_before: {aupr_before:.4f}, FPR(0.95)_before: {fpr_before:.4f}')
 
-                auroc, aupr, fpr = get_measures(id_conf, ood_conf, tpr)
-                avg_auroc += auroc
-                avg_aupr += aupr
-                avg_fpr += fpr
-                print(f'AUROC: {auroc:.4f}, AUPR: {aupr:.4f}, FPR(0.95): {fpr:.4f}')
+                auroc_gl_before, aupr_gl_before, fpr_gl_before = get_measures(id_conf_gl_before, ood_conf_gl_before, tpr)
+                avg_auroc_gl_before += auroc_gl_before
+                avg_aupr_gl_before += aupr_gl_before
+                avg_fpr_gl_before += fpr_gl_before
+                print(f'AUROC_glmcm_before: {auroc_gl_before:.4f}, AUPR_glmcm_before: {aupr_gl_before:.4f}, FPR(0.95)_glmcm_before: {fpr_gl_before:.4f}')
 
+                # 算text score
+                auroc_text, aupr_text, fpr_text = get_measures(id_conf_text, ood_conf_text, tpr)
+                avg_auroc_text += auroc_text
+                avg_aupr_text += aupr_text
+                avg_fpr_text += fpr_text
+                print(f'AUROC_text: {auroc_text:.4f}, AUPR_text: {aupr_text:.4f}, FPR(0.95)_text: {fpr_text:.4f}')
 
-                auroc_gl, aupr_gl, fpr_gl = get_measures(id_conf_gl, ood_conf_gl, tpr)
-                avg_auroc_gl += auroc_gl
-                avg_aupr_gl += aupr_gl
-                avg_fpr_gl += fpr_gl
-                print(f'AUROC_glmcm: {auroc_gl:.4f}, AUPR_glmcm: {aupr_gl:.4f}, FPR(0.95)_glmcm: {fpr_gl:.4f}')
+                auroc_gl_text, aupr_gl_text, fpr_gl_text = get_measures(id_conf_gl_text, ood_conf_gl_text, tpr)
+                avg_auroc_gl_text += auroc_gl_text
+                avg_aupr_gl_text += aupr_gl_text
+                avg_fpr_gl_text += fpr_gl_text
+                print(f'AUROC_glmcm_text: {auroc_gl_text:.4f}, AUPR_glmcm_text: {aupr_gl_text:.4f}, FPR(0.95)_glmcm_text: {fpr_gl_text:.4f}')
+
+                # 算cache score
+                auroc_cache, aupr_cache, fpr_cache = get_measures(id_conf_cache, ood_conf_cache, tpr)
+                avg_auroc_cache += auroc_cache
+                avg_aupr_cache += aupr_cache
+                avg_fpr_cache += fpr_cache
+                print(f'AUROC_cache: {auroc_cache:.4f}, AUPR_cache: {aupr_cache:.4f}, FPR(0.95)_cache: {fpr_cache:.4f}')
+
+                auroc_gl_cache, aupr_gl_cache, fpr_gl_cache = get_measures(id_conf_gl_cache, ood_conf_gl_cache, tpr)
+                avg_auroc_gl_cache += auroc_gl_cache
+                avg_aupr_gl_cache += aupr_gl_cache
+                avg_fpr_gl_cache += fpr_gl_cache
+                print(f'AUROC_glmcm_cache: {auroc_gl_cache:.4f}, AUPR_glmcm_cache: {aupr_gl_cache:.4f}, FPR(0.95)_glmcm_cache: {fpr_gl_cache:.4f}')
+
+                
+
+                # 算split score
+                auroc_splitscore, aupr_splitscore, fpr_splitscore = get_measures(id_conf_splitscore, ood_conf_splitscore, tpr)
+                avg_auroc_splitscore += auroc_splitscore
+                avg_aupr_splitscore += aupr_splitscore
+                avg_fpr_splitscore += fpr_splitscore
+                print(f'AUROC_splitscore: {auroc_splitscore:.4f}, AUPR_splitscore: {aupr_splitscore:.4f}, FPR(0.95)_splitscore: {fpr_splitscore:.4f}')
+
+                auroc_gl_splitscore, aupr_gl_splitscore, fpr_gl_splitscore = get_measures(id_conf_gl_splitscore, ood_conf_gl_splitscore, tpr)
+                avg_auroc_gl_splitscore += auroc_gl_splitscore
+                avg_aupr_gl_splitscore += aupr_gl_splitscore
+                avg_fpr_gl_splitscore += fpr_gl_splitscore
+                print(f'AUROC_glmcm_splitscore: {auroc_gl_splitscore:.4f}, AUPR_glmcm_splitscore: {aupr_gl_splitscore:.4f}, FPR(0.95)_glmcm_splitscore: {fpr_gl_splitscore:.4f}')
             
             print('--------------------------------')
-            avg_auroc /= len(ood_dataset_name)
-            avg_aupr /= len(ood_dataset_name)
-            avg_fpr /= len(ood_dataset_name)
-            print(f'Average AUROC: {avg_auroc:.4f}, Average AUPR: {avg_aupr:.4f}, Average FPR(0.95): {avg_fpr:.4f}')
 
-            avg_auroc_gl /= len(ood_dataset_name)
-            avg_aupr_gl /= len(ood_dataset_name)
-            avg_fpr_gl /= len(ood_dataset_name)
-            print(f'Average AUROC_glmcm: {avg_auroc_gl:.4f}, Average AUPR_glmcm: {avg_aupr_gl:.4f}, Average FPR(0.95)_glmcm: {avg_fpr_gl:.4f}')
+            # 算before score
+            avg_auroc_before /= len(ood_dataset_name)
+            avg_aupr_before /= len(ood_dataset_name)
+            avg_fpr_before /= len(ood_dataset_name)
+            print(f'Average AUROC_before: {avg_auroc_before:.4f}, Average AUPR_before: {avg_aupr_before:.4f}, Average FPR(0.95)_before: {avg_fpr_before:.4f}')
+
+            avg_auroc_gl_before /= len(ood_dataset_name)
+            avg_aupr_gl_before /= len(ood_dataset_name)
+            avg_fpr_gl_before /= len(ood_dataset_name)
+            print(f'Average AUROC_glmcm_before: {avg_auroc_gl_before:.4f}, Average AUPR_glmcm_before: {avg_aupr_gl_before:.4f}, Average FPR(0.95)_glmcm_before: {avg_fpr_gl_before:.4f}')
+
+            # 算text score
+            avg_auroc_text /= len(ood_dataset_name)
+            avg_aupr_text /= len(ood_dataset_name)
+            avg_fpr_text /= len(ood_dataset_name)
+            print(f'Average AUROC_text: {avg_auroc_text:.4f}, Average AUPR_text: {avg_aupr_text:.4f}, Average FPR(0.95)_text: {avg_fpr_text:.4f}')
+
+            avg_auroc_gl_text /= len(ood_dataset_name)
+            avg_aupr_gl_text /= len(ood_dataset_name)
+            avg_fpr_gl_text /= len(ood_dataset_name)
+            print(f'Average AUROC_glmcm_text: {avg_auroc_gl_text:.4f}, Average AUPR_glmcm_text: {avg_aupr_gl_text:.4f}, Average FPR(0.95)_glmcm_text: {avg_fpr_gl_text:.4f}')
+
+            # 算cache score
+            avg_auroc_cache /= len(ood_dataset_name)
+            avg_aupr_cache /= len(ood_dataset_name)
+            avg_fpr_cache /= len(ood_dataset_name)
+            print(f'Average AUROC_cache: {avg_auroc_cache:.4f}, Average AUPR_cache: {avg_aupr_cache:.4f}, Average FPR(0.95)_cache: {avg_fpr_cache:.4f}')
+
+            avg_auroc_gl_cache /= len(ood_dataset_name)
+            avg_aupr_gl_cache /= len(ood_dataset_name)
+            avg_fpr_gl_cache /= len(ood_dataset_name)
+            print(f'Average AUROC_glmcm_cache: {avg_auroc_gl_cache:.4f}, Average AUPR_glmcm_cache: {avg_aupr_gl_cache:.4f}, Average FPR(0.95)_glmcm_cache: {avg_fpr_gl_cache:.4f}')
+
+
+            # 算split score
+            avg_auroc_splitscore /= len(ood_dataset_name)
+            avg_aupr_splitscore /= len(ood_dataset_name)
+            avg_fpr_splitscore /= len(ood_dataset_name)
+            print(f'Average AUROC_splitscore: {avg_auroc_splitscore:.4f}, Average AUPR_splitscore: {avg_aupr_splitscore:.4f}, Average FPR(0.95)_splitscore: {avg_fpr_splitscore:.4f}')
+
+            avg_auroc_gl_splitscore /= len(ood_dataset_name)
+            avg_aupr_gl_splitscore /= len(ood_dataset_name)
+            avg_fpr_gl_splitscore /= len(ood_dataset_name)
+            print(f'Average AUROC_glmcm_splitscore: {avg_auroc_gl_splitscore:.4f}, Average AUPR_glmcm_splitscore: {avg_aupr_gl_splitscore:.4f}, Average FPR(0.95)_glmcm_splitscore: {avg_fpr_gl_splitscore:.4f}')
 if __name__ == '__main__':
     # python mymain.py --config configs/myconfig.yaml
     main()

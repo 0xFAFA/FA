@@ -1,7 +1,7 @@
 
 import os
 import sys
-os.environ["CUDA_VISIBLE_DEVICES"] = '6'
+os.environ["CUDA_VISIBLE_DEVICES"] = '4'
 
 import random
 import argparse
@@ -530,13 +530,13 @@ def main():
     # art of the # t5
     # a photo of the large # t6
     
-    is_train = 0
+    is_train = 1
 
     multiply_factor_name = str(origin_neutral_multiply_factor)+'-'+str(origin_likeforced_multiply_factor)
     lrname = str(cfg['lr']).replace('.','')
 
     model_name = 'fa'
-    cache_dir = os.path.join('./mycaches_new', cfg['id_dataset'], model_file_name_dict[cfg['backbone']], str(cfg['shots'])+'shots',model_name+'_bs'+str(cfg['fine_tune_batch_size'])+'_ep'+str(cfg['fine_tune_train_epoch']),'origin_neutral_and_likeforced',multiply_factor_name+'','lr'+lrname,'seed'+str(cfg['seed'])  )  #   
+    cache_dir = os.path.join('./mycaches_new', cfg['id_dataset'], model_file_name_dict[cfg['backbone']], str(cfg['shots'])+'shots',model_name+'_bs'+str(cfg['fine_tune_batch_size'])+'_ep'+str(cfg['fine_tune_train_epoch']),'origin_neutral_and_likeforced_trmH',multiply_factor_name+'','lr'+lrname,'seed'+str(cfg['seed'])  )  #   
 
     os.makedirs(cache_dir, exist_ok=True)
     cfg['cache_dir'] = cache_dir
@@ -551,8 +551,7 @@ def main():
     torch.backends.cudnn.benchmark = False
 
 
-
-    train_transform_aug = transforms.Compose([
+    transform_aug_H = transforms.Compose([
         transforms.RandomResizedCrop(size=224, scale=(0.8, 1), interpolation=transforms.InterpolationMode.BICUBIC),
         transforms.RandomHorizontalFlip(p=0.5),
         transforms.RandomVerticalFlip(p=0.5),
@@ -564,7 +563,53 @@ def main():
         transforms.Normalize(mean=(0.48145466, 0.4578275, 0.40821073), std=(0.26862954, 0.26130258, 0.27577711)),
 
     ])
+
+    transform_aug_H2 = transforms.Compose([
+        transforms.RandomResizedCrop(size=224, scale=(0.8, 1), interpolation=transforms.InterpolationMode.BICUBIC),
+        transforms.RandomHorizontalFlip(p=0.5),
+        # transforms.RandomVerticalFlip(p=0.5),
+        transforms.RandomRotation(degrees=5),
+        transforms.ColorJitter(brightness=0.15, contrast=0.1, saturation=0.1),
+        transforms.RandomGrayscale(p=0.1),
+        transforms.ToTensor(),
+        # transforms.RandomErasing(p=0.5, scale=(0.02, 0.33), ratio=(0.3, 3.3), value='random', inplace=False),
+        transforms.Normalize(mean=(0.48145466, 0.4578275, 0.40821073), std=(0.26862954, 0.26130258, 0.27577711)),
+
+    ])
+    transform_aug_H3 = transforms.Compose([
+        transforms.RandomResizedCrop(size=224, scale=(0.8, 1), interpolation=transforms.InterpolationMode.BICUBIC),
+        transforms.RandomHorizontalFlip(p=0.5),
+        transforms.RandomVerticalFlip(p=0.5),
+        transforms.RandomRotation(degrees=5),
+        # transforms.ColorJitter(brightness=0.15, contrast=0.1, saturation=0.1),
+        # transforms.RandomGrayscale(p=0.1),
+        transforms.ToTensor(),
+        # transforms.RandomErasing(p=0.5, scale=(0.02, 0.33), ratio=(0.3, 3.3), value='random', inplace=False),
+        transforms.Normalize(mean=(0.48145466, 0.4578275, 0.40821073), std=(0.26862954, 0.26130258, 0.27577711)),
+
+    ])
+    transform_aug_H4 = transforms.Compose([
+        transforms.RandomResizedCrop(size=224, scale=(0.8, 1), interpolation=transforms.InterpolationMode.BICUBIC),
+        transforms.RandomHorizontalFlip(p=0.5),
+        transforms.RandomVerticalFlip(p=0.5),
+        # transforms.RandomRotation(degrees=5),
+        transforms.ColorJitter(brightness=0.15, contrast=0.1, saturation=0.1),
+        transforms.RandomGrayscale(p=0.1),
+        transforms.ToTensor(),
+        # transforms.RandomErasing(p=0.5, scale=(0.02, 0.33), ratio=(0.3, 3.3), value='random', inplace=False),
+        transforms.Normalize(mean=(0.48145466, 0.4578275, 0.40821073), std=(0.26862954, 0.26130258, 0.27577711)),
+
+    ])
+
+    transform_aug_M = transforms.Compose([
+        transforms.RandomResizedCrop(size=224, scale=(0.5, 1), interpolation=transforms.InterpolationMode.BICUBIC),
+        transforms.RandomHorizontalFlip(p=0.5),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=(0.48145466, 0.4578275, 0.40821073), std=(0.26862954, 0.26130258, 0.27577711))
+    ])
+
     # train_transform_aug = preprocess
+    train_transform_aug = transform_aug_H
     train_transform_no_aug = preprocess
 
 

@@ -1,6 +1,6 @@
 import os
 import sys
-os.environ["CUDA_VISIBLE_DEVICES"] = '4'
+os.environ["CUDA_VISIBLE_DEVICES"] = '6'
 
 import random
 import argparse
@@ -135,7 +135,7 @@ class CustomCLIP(nn.Module):
         self.dtype = clip_model.dtype
         self.cfg = cfg
         self.classnum = len(classnames)
-        self.type_num = 2
+        self.type_num = 1
 
         self.image_encoder = clip_model.visual
         self.text_encoder = TextEncoder(clip_model)
@@ -148,31 +148,19 @@ class CustomCLIP(nn.Module):
         self.cache_keys_original = cache_keys_original
         self.cache_values_original = cache_values_original
 
-        self.residual_learner_text = nn.Parameter(torch.zeros( self.classnum , cfg['embed_dim']).half().cuda() )
+        # self.residual_learner_text = nn.Parameter(torch.zeros( self.classnum , cfg['embed_dim']).half().cuda() )
         self.tip_adapter = nn.Linear(self.cache_keys_forced.shape[1], self.cache_keys_forced.shape[0], bias=False)
         self.tip_adapter.weight = nn.Parameter(self.cache_keys_forced)  
 
+        self.origin_neutral_repeat_num = int(cfg['origin_neutral_multiply_factor'])
 
-        text_features_origin_neutral = get_origin_neutral_text_features(cfg['template_origin_neutral'], classnames, TextEncoder(clip_model), clip_model)  # neutral
-        # text_features_origin_neutral = get_base_text_features(cfg, classnames, clip_model, TextEncoder(clip_model))  # likeforced
-
-
-        origin_neutral_repeat_num = int(cfg['origin_neutral_multiply_factor'])
-
-        if origin_neutral_repeat_num == 0:
-            text_features_origin_neutral = text_features_origin_neutral.repeat(0, 1)
-            self.type_num -= 1
-
-        self.text_features_origin_neutral = text_features_origin_neutral
-        self.origin_neutral_repeat_num = origin_neutral_repeat_num
-        print(f"self.text_features_origin_neutral.shape: {self.text_features_origin_neutral.shape}")
 
 
     def forward(self, image):
         image_features, local_image_features = self.image_encoder(image.type(self.dtype))
 
         text_features_origin = self.text_features_origin.type(self.dtype).to(self.cfg['device'])
-        text_features = text_features_origin + self.cfg['text_feature_alpha'] * self.residual_learner_text #   t + a * x
+        text_features_origin = text_features_origin / text_features_origin.norm(dim=-1, keepdim=True)  
 
 
         image_features = image_features / image_features.norm(dim=-1, keepdim=True)
@@ -180,12 +168,10 @@ class CustomCLIP(nn.Module):
 
         logit_scale = self.logit_scale.exp()
         
-        # 计算text原型端logits
-        text_features_concat = torch.cat((text_features, self.text_features_origin_neutral,), dim=0) # concat
-        text_features_concat = text_features_concat / text_features_concat.norm(dim=-1, keepdim=True) # norm要在split之前进行
+
         
-        logits = logit_scale * image_features @ text_features_concat.transpose(-1, -2)
-        logits_local = logit_scale * local_image_features @ text_features_concat.T
+        logits = logit_scale * image_features @ text_features_origin.transpose(-1, -2)
+        logits_local = logit_scale * local_image_features @ text_features_origin.T
 
 
         batch_size, token_len, sum_template_len = logits_local.shape
@@ -198,14 +184,21 @@ class CustomCLIP(nn.Module):
 
 
         if self.origin_neutral_repeat_num > 0:
-            logits_origin_neutral = logits[:,1,:]
-            logits_local_origin_neutral = logits_local[:,:,1,:]
+            # repeat text original
+            # logits_origin_copy = logits[:,0,:]
+            # logits_local_origin_copy = logits_local[:,:,0,:]
 
-            logits_origin_neutral = logits_origin_neutral.repeat(1, self.origin_neutral_repeat_num)
-            logits_local_origin_neutral = logits_local_origin_neutral.repeat(1, 1, self.origin_neutral_repeat_num)
+            # just forced, original取0
+            logits_origin_copy = torch.zeros_like(logits_text, device=logits_text.device, dtype=logits_text.dtype)
+            logits_local_origin_copy = torch.zeros_like(logits_local_text, device=logits_local_text.device, dtype=logits_local_text.dtype)
 
-            logits_text = torch.cat((logits_text, logits_origin_neutral), dim=1)
-            logits_local_text = torch.cat((logits_local_text, logits_local_origin_neutral), dim=2)
+            logits_origin_copy = logits_origin_copy.repeat(1, self.origin_neutral_repeat_num)
+            logits_local_origin_copy = logits_local_origin_copy.repeat(1, 1, self.origin_neutral_repeat_num)
+
+            logits_text = torch.cat((logits_text, logits_origin_copy), dim=1)
+            logits_local_text = torch.cat((logits_local_text, logits_local_origin_copy), dim=2)
+
+
 
 
         # 计算cache原型端logits
@@ -280,6 +273,9 @@ def extract_cache_image_feature(cfg, clip_model, train_data_loader, type_str):
 
 
 
+
+
+
 def get_arguments():
 
     parser = argparse.ArgumentParser()
@@ -335,11 +331,11 @@ def main():
     is_train = 0
     is_extract_feature = 0
 
-    model_name = 'fa_taskres_tipadapter'
+    model_name = 'fa_tipadapter'
     lrname_taskres = str(cfg['taskres_lr']).replace('.','')
     lrname_tipadapter = str(cfg['tipadapter_lr']).replace('.','')
 
-    cache_dir = os.path.join('./mycaches_new', cfg['id_dataset'], model_file_name_dict[cfg['backbone']], str(cfg['shots'])+'shots', model_name, f'ep_taskres{cfg["taskres_train_epoch"]}_tipadapter{cfg["tipadapter_train_epoch"]}', 'trainHtrm_fcacheHtrm_ocacheblur3Htrm','neutral_len'+str(origin_neutral_multiply_factor), f'lr_taskres{lrname_taskres}_tipadapter{lrname_tipadapter}','seed'+str(cfg['seed'])  )  #   
+    cache_dir = os.path.join('./mycaches_new', cfg['id_dataset'], model_file_name_dict[cfg['backbone']], str(cfg['shots'])+'shots', model_name, f'ep_taskres{cfg["taskres_train_epoch"]}_tipadapter{cfg["tipadapter_train_epoch"]}', 'repeattextorigin_trainMtrm_fcacheMtrm_ocacheblurtrm','neutral_len'+str(origin_neutral_multiply_factor), f'lr_taskres{lrname_taskres}_tipadapter{lrname_tipadapter}','seed'+str(cfg['seed'])  )  #   
 
     os.makedirs(cache_dir, exist_ok=True)
     cfg['cache_dir'] = cache_dir
@@ -408,9 +404,9 @@ def main():
     # train_transform_aug = preprocess
     train_transform_no_aug = preprocess
 
-    train_transform = transform_aug_H
-    cache_transform_forced = transform_aug_H
-    cache_transform_original = transform_aug_blur_H
+    train_transform = transform_aug_M
+    cache_transform_forced = transform_aug_M
+    cache_transform_original = transform_aug_blur
 
 
 
@@ -497,7 +493,7 @@ def main():
         
 
         for name, param in model_stage2.named_parameters():
-            if  "residual_learner" in name or "tip_adapter" in name: # 
+            if   "tip_adapter" in name: # "residual_learner" in name or
                 param.requires_grad_(True)
                 print(name)
             else:
@@ -513,16 +509,16 @@ def main():
         # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer,  cfg['fine_tune_train_epoch'] * len(train_loader))
 
 
-        # for taskres
-        optimizer_taskres = torch.optim.Adam([model_stage2.module.residual_learner_text], lr=cfg['taskres_lr'], weight_decay=5e-4, eps=1e-5)
-        # optimizer_taskres = torch.optim.SGD([model_stage2.module.residual_learner_text], lr=cfg['taskres_lr'], weight_decay=5e-4, momentum=0.9, dampening=0, nesterov=False)
-        scheduler_taskres = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer_taskres,  cfg['taskres_train_epoch'] * len(train_loader))
-        print('optimizer_taskres:', optimizer_taskres)
-        print('scheduler_taskres:', scheduler_taskres)
+        # # for taskres
+        # optimizer_taskres = torch.optim.Adam([model_stage2.module.residual_learner_text], lr=cfg['taskres_lr'], weight_decay=5e-4, eps=1e-5)
+        # # optimizer_taskres = torch.optim.SGD([model_stage2.module.residual_learner_text], lr=cfg['taskres_lr'], weight_decay=5e-4, momentum=0.9, dampening=0, nesterov=False)
+        # scheduler_taskres = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer_taskres,  cfg['taskres_train_epoch'] * len(train_loader))
+        # print('optimizer_taskres:', optimizer_taskres)
+        # print('scheduler_taskres:', scheduler_taskres)
 
 
         # for tipadapter
-        optimizer_tipadapter = torch.optim.AdamW(model_stage2.module.tip_adapter.parameters(), lr=cfg['tipadapter_lr'], weight_decay=5e-4, eps=1e-4)  #
+        optimizer_tipadapter = torch.optim.AdamW(model_stage2.module.tip_adapter.parameters(), lr=cfg['tipadapter_lr'], eps=1e-4)  #, weight_decay=5e-4
         # optimizer_tipadapter = torch.optim.SGD(model_stage2.module.tip_adapter.parameters(), lr=cfg['tipadapter_lr'], weight_decay=5e-4, momentum=0.9, dampening=0, nesterov=False) 
         scheduler_tipadapter = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer_tipadapter,  cfg['tipadapter_train_epoch'] * len(train_loader))
         print('optimizer_tipadapter:', optimizer_tipadapter)
@@ -531,7 +527,7 @@ def main():
 
         # 取二者中的最大值
         # train_epoch = cfg['fine_tune_train_epoch']
-        train_epoch = max(cfg['taskres_train_epoch'], cfg['tipadapter_train_epoch'])
+        train_epoch =  cfg['tipadapter_train_epoch']  #
 
         for train_idx in range(train_epoch):
             print('Train Epoch: {:} / {:}'.format(train_idx+1, train_epoch))
@@ -550,14 +546,14 @@ def main():
                 all_samples += len(logits)
                 loss_list.append(loss.item())
 
-                optimizer_taskres.zero_grad() 
+                # optimizer_taskres.zero_grad() 
                 optimizer_tipadapter.zero_grad() 
 
                 loss.backward()
 
-                if train_idx < cfg['taskres_train_epoch']:
-                    optimizer_taskres.step() 
-                    scheduler_taskres.step()       
+                # if train_idx < cfg['taskres_train_epoch']:
+                #     optimizer_taskres.step() 
+                #     scheduler_taskres.step()       
 
                 
                 if train_idx < cfg['tipadapter_train_epoch']:
@@ -566,8 +562,8 @@ def main():
 
 
     
-            current_lr_taskres = scheduler_taskres.get_last_lr()[0]
-            print('LR_taskres: {:.6f}, train_acc: {:.4f} ({:}/{:}), Loss: {:.4f}'.format(current_lr_taskres, correct_samples / all_samples, correct_samples, all_samples, sum(loss_list)/len(loss_list)))
+            # current_lr_taskres = scheduler_taskres.get_last_lr()[0]
+            # print('LR_taskres: {:.6f}, train_acc: {:.4f} ({:}/{:}), Loss: {:.4f}'.format(current_lr_taskres, correct_samples / all_samples, correct_samples, all_samples, sum(loss_list)/len(loss_list)))
 
             current_lr_tipadapter = scheduler_tipadapter.get_last_lr()[0]
             print('LR_tipadapter: {:.6f}, train_acc: {:.4f} ({:}/{:}), Loss: {:.4f}'.format(current_lr_tipadapter, correct_samples / all_samples, correct_samples, all_samples, sum(loss_list)/len(loss_list)))

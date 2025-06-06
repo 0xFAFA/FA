@@ -406,7 +406,7 @@ def main():
     # print(cfg['embed_dim'])
 
 
-    multiply_factor = 1 # multiply_factor - 1 代表论文里的K
+    multiply_factor = 3 # multiply_factor - 1 代表论文里的K
     cfg['multiply_factor'] = 3
     csc = False 
     cfg['csc'] = csc
@@ -616,7 +616,7 @@ def main():
         elif cfg['ood_dataset'] == 'nearood':
             test_file_name = 'log_test_ood_nearood.txt'
         elif cfg['ood_dataset'] == 'common':
-            test_file_name = 'log_test_ood_common_inferlen3.txt'
+            test_file_name = 'log_test_ood_common.txt'
         else:
             test_file_name = f'log_test_ood_{cfg["ood_dataset"]}.txt'
         sys.stdout = Logger( os.path.join(cache_dir, test_file_name) ,  stream=sys.stdout)

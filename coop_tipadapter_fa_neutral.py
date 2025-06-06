@@ -1,7 +1,7 @@
 
 import os
 import sys
-os.environ["CUDA_VISIBLE_DEVICES"] = '7'
+os.environ["CUDA_VISIBLE_DEVICES"] = '3'
 
 import random
 import argparse
@@ -269,21 +269,7 @@ def get_origin_neutral_text_features(origin_prompt, classnames, text_encoder, cl
 
     return origin_text_features.to(device)
 
-def get_origin_neglabel_text_features(origin_neglabel_list, classnames, text_encoder, clip_model):
-    device = next(text_encoder.parameters()).device
 
-    if clip_model.dtype == torch.float16:
-        text_encoder = text_encoder.cuda()
-
-    with torch.no_grad():
-        prompts = origin_neglabel_list
-        tokenized_prompts = torch.cat([clip.tokenize(p) for p in prompts]).to(clip_model.positional_embedding.device)
-        embedding_prompts = clip_model.token_embedding(tokenized_prompts).type(clip_model.dtype)
-
-        origin_text_features = text_encoder(embedding_prompts.cuda(), tokenized_prompts.cuda())
-
-    print(f"origin_text_features.shape: {origin_text_features.shape}")  #
-    return origin_text_features.to(device)
 
 
 
@@ -313,38 +299,35 @@ class CustomCLIP(nn.Module):
         self.cfg = cfg
         self.classnum = len(classnames)
 
-        # self.type_num = 3
+        self.type_num = 3
 
 
-        # text_features_origin_neutral = get_origin_neutral_text_features(CTX_INIT_ORIGIN_neutral, classnames, self.text_encoder, clip_model)
-        # text_features_origin_likeforced = get_origin_likeforced_text_features(self.prompt_learner, self.text_encoder, clip_model)
-
-        self.text_features_origin_label = get_origin_neglabel_text_features(cfg['origin_neglabel_list'], classnames, self.text_encoder, clip_model)
+        text_features_origin_neutral = get_origin_neutral_text_features(CTX_INIT_ORIGIN_neutral, classnames, self.text_encoder, clip_model)
+        text_features_origin_likeforced = get_origin_likeforced_text_features(self.prompt_learner, self.text_encoder, clip_model)
 
 
+        origin_neutral_repeat_num = int(cfg['origin_neutral_multiply_factor'])
+        origin_likeforced_repeat_num = int(cfg['origin_likeforced_multiply_factor'])
 
-        # origin_neutral_repeat_num = int(cfg['origin_neutral_multiply_factor'])
-        # origin_likeforced_repeat_num = int(cfg['origin_likeforced_multiply_factor'])
-
-        # if origin_neutral_repeat_num == 0:
-        #     text_features_origin_neutral = text_features_origin_neutral.repeat(0, 1)
-        #     self.type_num -= 1
+        if origin_neutral_repeat_num == 0:
+            text_features_origin_neutral = text_features_origin_neutral.repeat(0, 1)
+            self.type_num -= 1
 
         
-        # if origin_likeforced_repeat_num == 0:
-        #     text_features_origin_likeforced = text_features_origin_likeforced.repeat(0, 1)
-        #     self.type_num -= 1
+        if origin_likeforced_repeat_num == 0:
+            text_features_origin_likeforced = text_features_origin_likeforced.repeat(0, 1)
+            self.type_num -= 1
         
 
 
         
-        # self.text_features_origin_neutral = text_features_origin_neutral
-        # self.origin_neutral_repeat_num = origin_neutral_repeat_num
-        # print(f"self.text_features_origin_neutral.shape: {self.text_features_origin_neutral.shape}")
+        self.text_features_origin_neutral = text_features_origin_neutral
+        self.origin_neutral_repeat_num = origin_neutral_repeat_num
+        print(f"self.text_features_origin_neutral.shape: {self.text_features_origin_neutral.shape}")
 
-        # self.text_features_origin_likeforced = text_features_origin_likeforced
-        # self.origin_likeforced_repeat_num = origin_likeforced_repeat_num
-        # print(f"self.text_features_origin_likeforced.shape: {self.text_features_origin_likeforced.shape}")
+        self.text_features_origin_likeforced = text_features_origin_likeforced
+        self.origin_likeforced_repeat_num = origin_likeforced_repeat_num
+        print(f"self.text_features_origin_likeforced.shape: {self.text_features_origin_likeforced.shape}")
 
         
     def frozen_weights(self):
@@ -375,13 +358,11 @@ class CustomCLIP(nn.Module):
         local_image_features = local_image_features / local_image_features.norm(dim=-1, keepdim=True)
 
         # concat
-        # text_features_concat = torch.cat((text_features_forced, self.text_features_origin_neutral, self.text_features_origin_likeforced, self.text_features_origin_label), dim=0)
-        text_features_concat = torch.cat((text_features_forced, self.text_features_origin_label), dim=0)
-
+        text_features_concat = torch.cat((text_features_forced, self.text_features_origin_neutral, self.text_features_origin_likeforced), dim=0)
         text_features_concat = text_features_concat / text_features_concat.norm(dim=-1, keepdim=True) # norm要在split之前进行
 
         logit_scale = self.logit_scale.exp()
-        # text_features_concat_temp = text_features_concat.view(-1, self.classnum, self.cfg['embed_dim'])
+        text_features_concat_temp = text_features_concat.view(-1, self.classnum, self.cfg['embed_dim'])
         # print(f"text_features_concat_temp.shape: {text_features_concat_temp.shape}")  
 
 
@@ -391,46 +372,77 @@ class CustomCLIP(nn.Module):
         logits = logit_scale * image_features @ text_features_concat.transpose(-1, -2)
         logits_local = logit_scale * local_image_features @ text_features_concat.T
 
-        # batch_size, token_len, sum_template_len = logits_local.shape
+        batch_size, token_len, sum_template_len = logits_local.shape
 
-        # logits = logits.view(batch_size, self.type_num, self.classnum)
-        # logits_local = logits_local.view(batch_size, token_len, self.type_num, self.classnum)
+        logits = logits.view(batch_size, self.type_num, self.classnum)
+        logits_local = logits_local.view(batch_size, token_len, self.type_num, self.classnum)
 
-        # logits_final = logits[:,0,:]
-        # logits_local_final = logits_local[:,:,0,:]
+        logits_final = logits[:,0,:]
+        logits_local_final = logits_local[:,:,0,:]
 
 
-        # if self.origin_neutral_repeat_num > 0:
-        #     logits_origin_neutral = logits[:,1,:]
-        #     logits_local_origin_neutral = logits_local[:,:,1,:]
+        if self.origin_neutral_repeat_num > 0:
+            logits_origin_neutral = logits[:,1,:]
+            logits_local_origin_neutral = logits_local[:,:,1,:]
 
-        #     logits_origin_neutral = logits_origin_neutral.repeat(1, self.origin_neutral_repeat_num)
-        #     logits_local_origin_neutral = logits_local_origin_neutral.repeat(1, 1, self.origin_neutral_repeat_num)
+            logits_origin_neutral = logits_origin_neutral.repeat(1, self.origin_neutral_repeat_num)
+            logits_local_origin_neutral = logits_local_origin_neutral.repeat(1, 1, self.origin_neutral_repeat_num)
 
-        #     logits_final = torch.cat((logits_final, logits_origin_neutral), dim=1)
-        #     logits_local_final = torch.cat((logits_local_final, logits_local_origin_neutral), dim=2)
+            logits_final = torch.cat((logits_final, logits_origin_neutral), dim=1)
+            logits_local_final = torch.cat((logits_local_final, logits_local_origin_neutral), dim=2)
 
-        # if self.origin_likeforced_repeat_num > 0:
-        #     if self.origin_neutral_repeat_num > 0:
-        #         logits_origin_likeforced = logits[:,2,:]
-        #         logits_local_origin_likeforced = logits_local[:,:,2,:]
-        #     else:
-        #         logits_origin_likeforced = logits[:,1,:]
-        #         logits_local_origin_likeforced = logits_local[:,:,1,:]
+        if self.origin_likeforced_repeat_num > 0:
+            if self.origin_neutral_repeat_num > 0:
+                logits_origin_likeforced = logits[:,2,:]
+                logits_local_origin_likeforced = logits_local[:,:,2,:]
+            else:
+                logits_origin_likeforced = logits[:,1,:]
+                logits_local_origin_likeforced = logits_local[:,:,1,:]
             
-        #     logits_origin_likeforced = logits_origin_likeforced.repeat(1, self.origin_likeforced_repeat_num)
-        #     logits_local_origin_likeforced = logits_local_origin_likeforced.repeat(1, 1, self.origin_likeforced_repeat_num)
+            logits_origin_likeforced = logits_origin_likeforced.repeat(1, self.origin_likeforced_repeat_num)
+            logits_local_origin_likeforced = logits_local_origin_likeforced.repeat(1, 1, self.origin_likeforced_repeat_num)
 
-        #     logits_final = torch.cat((logits_final, logits_origin_likeforced), dim=1)
-        #     logits_local_final = torch.cat((logits_local_final, logits_local_origin_likeforced), dim=2)
+            logits_final = torch.cat((logits_final, logits_origin_likeforced), dim=1)
+            logits_local_final = torch.cat((logits_local_final, logits_local_origin_likeforced), dim=2)
         
-        # logits = logits_final
-        # logits_local = logits_local_final
-
-
+        logits = logits_final
+        logits_local = logits_local_final
 
         
         return logits, logits_local
+
+def extract_cache_image_feature(cfg, clip_model, train_data_loader, type_str):
+    cache_keys = []
+    cache_values = []
+    with torch.no_grad():
+        # Data augmentation for the cache model
+        for augment_idx in range(cfg['augment_epoch']):
+            train_features = []
+            print('Augment Epoch: {:} / {:}'.format(augment_idx, cfg['augment_epoch']))
+
+            for i, (images, target) in enumerate(tqdm(train_data_loader)):
+                images = images.cuda()
+                image_features,image_features_local = clip_model.encode_image(images)
+                train_features.append(image_features)
+                if augment_idx == 0:
+                    target = target.cuda()
+                    cache_values.append(target)
+            cache_keys.append(torch.cat(train_features, dim=0).unsqueeze(0))
+        
+    cache_keys = torch.cat(cache_keys, dim=0).mean(dim=0) #
+    cache_keys /= cache_keys.norm(dim=-1, keepdim=True)
+
+    cache_values = F.one_hot(torch.cat(cache_values, dim=0)).half()
+    # torch.save(cache_keys, cfg['cache_dir'] + '/keys_' + str(cfg['shots']) + "shots.pt")
+    torch.save(cache_keys, f"{cfg['cache_dir']}/keys_{str(cfg['shots'])}shots_{type_str}.pt")
+    # torch.save(cache_values, cfg['cache_dir'] + '/values_' + str(cfg['shots']) + "shots.pt")
+    torch.save(cache_values, f"{cfg['cache_dir']}/values_{str(cfg['shots'])}shots_{type_str}.pt")
+
+    print(type_str+' cache_keys shape:', cache_keys.shape)
+    print(type_str+' cache_values shape:', cache_values.shape)
+
+
+    return
 
 
 def get_arguments():
@@ -479,22 +491,20 @@ def main():
     # print(cfg['embed_dim'])
 
 
-    origin_neutral_multiply_factor = 0
+    origin_neutral_multiply_factor = 3
     origin_likeforced_multiply_factor = 0
     # neutral=0 : likeforced=2 相当于之前lenx3
 
     # cfg['origin_neutral_multiply_factor'] = origin_neutral_multiply_factor
     # cfg['origin_likeforced_multiply_factor'] = origin_likeforced_multiply_factor
 
-    cfg['origin_neutral_multiply_factor'] = 0
+    cfg['origin_neutral_multiply_factor'] = 3
     cfg['origin_likeforced_multiply_factor'] = 0
-
-    cfg['origin_neglabel_len'] = 4
 
 
     csc = False 
     cfg['csc'] = csc
-    cfg['csc_ctx_len'] = 16 #
+    cfg['csc_ctx_len'] = 16 # 待定修改 
 
     cfg['template'] = 'a photo of a'  # 
     # cfg['template'] = 'the nice'  # 
@@ -507,33 +517,17 @@ def main():
     # itap of a # t4
     # art of the # t5
     # a photo of the large # t6
-
-
-    neg_label_txt = "./selected_neg_labels_in1k_10k.txt"  # neglabel
-    # neg_label_txt = "./selected_neg_labels.txt"  # csp
-    neg_label_list = []
-
-    # 读取neg_label_txt，其每行为一个字符串，依次读取文本文件每行，然后添加到列表中
-    with open(neg_label_txt, 'r') as f:
-        for line in f:
-            line = line.strip()  # 去除首尾空格
-            neg_label_list.append(line)
-
-    print(f"len of neg_label_list: {len(neg_label_list)}")
-    # 输出倒数10行
-    # print(f"neg_label_list[-10:]: {neg_label_list[-10:]}")
-
-    # 取前cfg['origin_neglabel_len']*1000个
-    neg_label_list = neg_label_list[400 : ( 400 + cfg['origin_neglabel_len'] * 1000 ) ]
-    cfg['origin_neglabel_list'] = neg_label_list
     
-    is_train = 0
+    is_train = 1
+    is_extract_feature = 1
 
-    multiply_factor_name = str(origin_neutral_multiply_factor)+'-'+str(origin_likeforced_multiply_factor)
-    lrname = str(cfg['lr']).replace('.','')
+    model_name = 'coop_tipadapter_fa'
+    lrname_coop = str(cfg['taskres_lr']).replace('.','')
+    lrname_tipadapter = str(cfg['tipadapter_lr']).replace('.','')
 
-    model_name = 'fa_neglabel'
-    cache_dir = os.path.join('./mycaches_new', cfg['id_dataset'], model_file_name_dict[cfg['backbone']], str(cfg['shots'])+'shots',model_name+'_bs'+str(cfg['fine_tune_batch_size'])+'_ep'+str(cfg['fine_tune_train_epoch']),'origin_neglabel',multiply_factor_name+'_'+str(cfg['origin_neglabel_len'])+'_slice4-4','lr'+lrname,'seed'+str(cfg['seed'])  )  #   
+
+
+    cache_dir = os.path.join('./mycaches_new', cfg['id_dataset'], model_file_name_dict[cfg['backbone']], str(cfg['shots'])+'shots', model_name, f'ep_coop{cfg["coop_train_epoch"]}_tipadapter{cfg["tipadapter_train_epoch"]}', 'trainHtrm_fcacheHtrm_ocacheblur3Htrm','neutral_len'+str(origin_neutral_multiply_factor), f'lr_coop{lrname_coop}_tipadapter{lrname_tipadapter}','seed'+str(cfg['seed'])  )  #   
 
     os.makedirs(cache_dir, exist_ok=True)
     cfg['cache_dir'] = cache_dir
@@ -548,8 +542,7 @@ def main():
     torch.backends.cudnn.benchmark = False
 
 
-
-    train_transform_aug = transforms.Compose([
+    transform_aug_H = transforms.Compose([
         transforms.RandomResizedCrop(size=224, scale=(0.8, 1), interpolation=transforms.InterpolationMode.BICUBIC),
         transforms.RandomHorizontalFlip(p=0.5),
         transforms.RandomVerticalFlip(p=0.5),
@@ -561,9 +554,51 @@ def main():
         transforms.Normalize(mean=(0.48145466, 0.4578275, 0.40821073), std=(0.26862954, 0.26130258, 0.27577711)),
 
     ])
+
+    transform_aug_M = transforms.Compose([
+        transforms.RandomResizedCrop(size=224, scale=(0.5, 1), interpolation=transforms.InterpolationMode.BICUBIC),
+        transforms.RandomHorizontalFlip(p=0.5),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=(0.48145466, 0.4578275, 0.40821073), std=(0.26862954, 0.26130258, 0.27577711))
+    ])
+
+    transform_aug_blur_M = transforms.Compose([
+        # transforms.Resize(size=224,interpolation=transforms.InterpolationMode.BICUBIC),
+        # transforms.CenterCrop(size=224),
+        transforms.RandomResizedCrop(size=224, scale=(0.5, 1), interpolation=transforms.InterpolationMode.BICUBIC),
+        transforms.RandomHorizontalFlip(p=0.5),
+    
+        # transforms.RandomApply([
+        #     transforms.GaussianBlur(kernel_size=15, sigma=(2.0, 7.0))
+        # ], p=0.5),  # 50% 概率应用模糊
+        transforms.GaussianBlur(kernel_size=15, sigma=(2.0, 7.0)),
+
+        transforms.ToTensor(),
+        transforms.Normalize(mean=(0.48145466, 0.4578275, 0.40821073), std=(0.26862954, 0.26130258, 0.27577711))
+    ])
+
+    transform_aug_blur_H = transforms.Compose([
+        transforms.RandomResizedCrop(size=224, scale=(0.8, 1), interpolation=transforms.InterpolationMode.BICUBIC),
+        transforms.RandomHorizontalFlip(p=0.5),
+        transforms.RandomVerticalFlip(p=0.5),
+        transforms.RandomRotation(degrees=5),
+        transforms.ColorJitter(brightness=0.15, contrast=0.1, saturation=0.1),
+        transforms.RandomGrayscale(p=0.1),
+    
+
+        transforms.GaussianBlur(kernel_size=15, sigma=(2.0, 15.0)),  # 2-15->blur3H,2-7->blurH
+
+        transforms.ToTensor(),
+        transforms.Normalize(mean=(0.48145466, 0.4578275, 0.40821073), std=(0.26862954, 0.26130258, 0.27577711))
+    ])
+
+
     # train_transform_aug = preprocess
     train_transform_no_aug = preprocess
 
+    train_transform = transform_aug_H
+    cache_transform_forced = transform_aug_H
+    cache_transform_original = transform_aug_blur_H
 
 
     
@@ -574,7 +609,7 @@ def main():
         print(cfg, "\n")
 
         print("augment transform:")
-        for transform in train_transform_aug.transforms:
+        for transform in train_transform.transforms:
             print(transform)
 
 
@@ -586,7 +621,7 @@ def main():
         val_loader = build_data_loader(data_source=few_shot_dataset_stage2.val, batch_size=test_batch_size, is_train=False, tfm=train_transform_no_aug, shuffle=False)
         test_loader = build_data_loader(data_source=few_shot_dataset_stage2.test, batch_size=test_batch_size, is_train=False, tfm=train_transform_no_aug, shuffle=False)
 
-        train_loader = build_data_loader(data_source=few_shot_dataset_stage2.train_x, batch_size=train_batch_size, tfm=train_transform_aug, is_train=True, shuffle=True)
+        train_loader = build_data_loader(data_source=few_shot_dataset_stage2.train_x, batch_size=train_batch_size, tfm=train_transform, is_train=True, shuffle=True)
         
         
         cfg['classnames'] = few_shot_dataset_stage2.classnames # 
@@ -598,6 +633,52 @@ def main():
         print(f"len of origin classnames: {len(cfg['classnames'])}")
         print(f"origin_neutral_multiply_factor: {cfg['origin_neutral_multiply_factor']}")
         print(f"origin_likeforced_multiply_factor: {cfg['origin_likeforced_multiply_factor']}")
+
+
+
+        if is_extract_feature == 1:
+            print("cache transform forced:")
+            for transform in cache_transform_forced.transforms:
+                print(transform)
+            
+            print("cache transform original:")
+            for transform in cache_transform_original.transforms:
+                print(transform)
+
+            train_loader_extract_forced = build_data_loader(data_source=few_shot_dataset_stage2.train_x, batch_size=train_batch_size, tfm=cache_transform_forced, is_train=True, shuffle=False)
+            train_loader_extract_original = build_data_loader(data_source=few_shot_dataset_stage2.train_x, batch_size=train_batch_size, tfm=cache_transform_original, is_train=True, shuffle=False)
+
+
+            extract_cache_image_feature(cfg, clip_model, train_loader_extract_forced, "forced") #  
+            extract_cache_image_feature(cfg, clip_model, train_loader_extract_original, "original") #  
+            print('extract cache image feature done')
+            
+
+
+        # load cache keys and values
+        # cache_keys = torch.load(cfg['cache_dir'] + '/keys_' + str(cfg['shots']) + "shots.pt")
+        cache_keys_forced = torch.load(f"{cfg['cache_dir']}/keys_{str(cfg['shots'])}shots_forced.pt")
+        cache_keys_original = torch.load(cfg['cache_dir'] + '/keys_' + str(cfg['shots']) + "shots_original.pt")
+        # cache_values = torch.load(cfg['cache_dir'] + '/values_' + str(cfg['shots']) + "shots.pt")
+        cache_values_forced = torch.load(f"{cfg['cache_dir']}/values_{str(cfg['shots'])}shots_forced.pt")
+        cache_values_original = torch.load(cfg['cache_dir'] + '/values_' + str(cfg['shots']) + "shots_original.pt")
+
+        # cache_keys = cache_keys.to(device)
+        cache_keys_forced = cache_keys_forced.to(device)
+        cache_keys_original = cache_keys_original.to(device)
+
+        # cache_values = cache_values.to(device)
+        cache_values_forced = cache_values_forced.to(device)
+        cache_values_original = cache_values_original.to(device)
+
+        # print('cache_keys shape:', cache_keys.shape)
+        print('cache_keys_forced shape:', cache_keys_forced.shape)
+        print('cache_keys_original shape:', cache_keys_original.shape)
+        
+        # print('cache_values shape:', cache_values.shape)
+        print('cache_values_forced shape:', cache_values_forced.shape)
+        print('cache_values_original shape:', cache_values_original.shape)
+
 
 
         # Model_stage2
@@ -694,10 +775,6 @@ def main():
             # test
             if  train_idx == train_epoch - 1 :   
                 model_stage2.eval()
-
-                # save model
-                torch.save(model_stage2.state_dict(), os.path.join(cfg['cache_dir'], 'model.pth'))
-
                 with torch.no_grad():
                     correct_samples, all_samples = 0, 0
                     topk = 1
@@ -711,10 +788,8 @@ def main():
 
                         outputs = outputs / 100.0
                         batch_size, repeat_len = outputs.shape
-                        # outputs_temp = outputs.view(batch_size, 1+cfg['origin_neutral_multiply_factor']+cfg['origin_likeforced_multiply_factor']+cfg['origin_neglabel_len'] , len(cfg['classnames']))
-                        # just_origin_outputs = outputs_temp[:,0,:]
-                        # 只取forced prompt对应的logits
-                        just_origin_outputs = outputs[:,0:len(cfg['classnames'])]
+                        outputs_temp = outputs.view(batch_size, cfg['origin_neutral_multiply_factor']+cfg['origin_likeforced_multiply_factor']+1 , len(cfg['classnames']))
+                        just_origin_outputs = outputs_temp[:,0,:]
 
 
                         pred = just_origin_outputs.topk(topk, 1, True, True)[1].t()
@@ -731,6 +806,12 @@ def main():
                     print(f'test Epoch [{train_idx+1}/{train_epoch}], Test accuracy of the model on the test images: { 100 * test_acc :.2f}%')
 
 
+                    # if test_acc > best_test_acc:
+                        # best_test_acc = test_acc
+                        # best_epoch = train_idx
+
+                    # save model
+                    torch.save(model_stage2.state_dict(), os.path.join(cfg['cache_dir'], 'model.pth'))
 
 
 
@@ -817,7 +898,6 @@ def main():
             # logit_result
             id_conf = np.array([])
             id_conf_gl = np.array([])
-            id_conf_my = np.array([])
 
             # run id dataset
             for images, labels in tqdm(test_loader_id):
@@ -832,19 +912,16 @@ def main():
 
                 # ----
                 batch_size, token_len, repeat_len = logits_id_local.shape
-                # logits_id_temp = logits_id.view(batch_size, 1+cfg['origin_neutral_multiply_factor']+cfg['origin_likeforced_multiply_factor']+cfg['origin_neglabel_len'] , len(cfg['classnames']))
-                # just_origin_logits_id = logits_id_temp[:,0,:]
-                just_origin_logits_id = logits_id[:, :len(cfg['classnames'])]  
-
+                logits_id_temp = logits_id.view(batch_size, cfg['origin_neutral_multiply_factor']+cfg['origin_likeforced_multiply_factor']+1 , len(cfg['classnames']))
+                just_origin_logits_id = logits_id_temp[:,0,:]
                 # print(just_origin_logits_id.shape) # torch.Size([200, 1000])
                 # print(just_origin_logits_id[0,:10])
 
                 # print(logits_id_temp[0,1,:10]) #
                 # print(logits_id_temp[0,2,:10]) # the same
 
-                # logits_id_local_temp = logits_id_local.view(batch_size, token_len, 1+cfg['origin_neutral_multiply_factor']+cfg['origin_likeforced_multiply_factor']+cfg['origin_neglabel_len'] , len(cfg['classnames']))
-                # just_origin_logits_id_local = logits_id_local_temp[:,:,0,:]
-                just_origin_logits_id_local = logits_id_local[:, :, :len(cfg['classnames'])] 
+                logits_id_local_temp = logits_id_local.view(batch_size, token_len, cfg['origin_neutral_multiply_factor']+cfg['origin_likeforced_multiply_factor']+1 , len(cfg['classnames']))
+                just_origin_logits_id_local = logits_id_local_temp[:,:,0,:]
                 # ----
 
 
@@ -854,18 +931,14 @@ def main():
                 smax_global = smax_global[:, :len(cfg['classnames'])]  # 只取forced
                 mcm_global_score = np.max(smax_global, axis=1)
 
-                my_score = np.sum(smax_global, axis=1) #
-
-
                 smax_local = F.softmax(logits_id_local/T, dim=-1)
                 smax_local = smax_local.cpu().numpy()
-                smax_local = smax_local[:, :, :len(cfg['classnames'])]
+                smax_local = smax_local[:, :, :len(cfg['classnames'])]  # 只取forced
                 mcm_local_score = np.max(smax_local, axis=(1, 2))
                 # print(logits_id.size)
 
                 id_conf = np.concatenate((id_conf, mcm_global_score))
                 id_conf_gl = np.concatenate((id_conf_gl, mcm_global_score + mcm_local_score))
-                id_conf_my = np.concatenate((id_conf_my, my_score))
 
 
                 # caculate accuracy
@@ -894,13 +967,11 @@ def main():
             # avarage ood 
             avg_auroc, avg_aupr, avg_fpr = 0.0, 0.0, 0.0
             avg_auroc_gl, avg_aupr_gl, avg_fpr_gl = 0.0, 0.0, 0.0
-            avg_auroc_my, avg_aupr_my, avg_fpr_my = 0.0, 0.0, 0.0
 
             for cur_ood_dataset in ood_dataset_name:
                 print(f'cur ood dataset: {cur_ood_dataset}')
                 ood_conf = np.array([])
                 ood_conf_gl = np.array([])
-                ood_conf_my = np.array([])
 
                 if  cur_ood_dataset == 'ood':
                     ood_dataset = datasets.ImageFolder(root=os.path.join(cfg['ood_dataset_path'], cur_ood_dataset), transform=train_transform_no_aug)
@@ -934,10 +1005,8 @@ def main():
 
                     smax_global = F.softmax(logits_ood/T, dim=-1)
                     smax_global = smax_global.cpu().numpy()
-                    smax_global = smax_global[:, :len(cfg['classnames'])]  
+                    smax_global = smax_global[:, :len(cfg['classnames'])]
                     mcm_global_score = np.max(smax_global, axis=1)
-
-                    my_score = np.sum(smax_global, axis=1)
 
                     smax_local = F.softmax(logits_ood_local/T, dim=-1)
                     smax_local = smax_local.cpu().numpy()
@@ -947,7 +1016,6 @@ def main():
 
                     ood_conf = np.concatenate((ood_conf, mcm_global_score))
                     ood_conf_gl = np.concatenate((ood_conf_gl, mcm_global_score + mcm_local_score))
-                    ood_conf_my = np.concatenate((ood_conf_my, my_score))
 
 
                 print('id_conf size',id_conf.size)
@@ -971,12 +1039,6 @@ def main():
                 avg_aupr_gl += aupr_gl
                 avg_fpr_gl += fpr_gl
                 print(f'AUROC_glmcm: {auroc_gl:.4f}, AUPR_glmcm: {aupr_gl:.4f}, FPR(0.95)_glmcm: {fpr_gl:.4f}')
-
-                auroc_my, aupr_my, fpr_my = get_measures(id_conf_my, ood_conf_my, tpr)
-                avg_auroc_my += auroc_my
-                avg_aupr_my += aupr_my
-                avg_fpr_my += fpr_my
-                print(f'AUROC_my: {auroc_my:.4f}, AUPR_my: {aupr_my:.4f}, FPR(0.95)_my: {fpr_my:.4f}')
             
             print('--------------------------------')
             avg_auroc /= len(ood_dataset_name)
@@ -988,14 +1050,6 @@ def main():
             avg_aupr_gl /= len(ood_dataset_name)
             avg_fpr_gl /= len(ood_dataset_name)
             print(f'Average AUROC_glmcm: {avg_auroc_gl:.4f}, Average AUPR_glmcm: {avg_aupr_gl:.4f}, Average FPR(0.95)_glmcm: {avg_fpr_gl:.4f}')
-
-
-            avg_auroc_my /= len(ood_dataset_name)
-            avg_aupr_my /= len(ood_dataset_name)
-            avg_fpr_my /= len(ood_dataset_name)
-            print(f'Average AUROC_my: {avg_auroc_my:.4f}, Average AUPR_my: {avg_aupr_my:.4f}, Average FPR(0.95)_my: {avg_fpr_my:.4f}')
-
-
 if __name__ == '__main__':
     # python mymain.py --config configs/myconfig.yaml
     main()

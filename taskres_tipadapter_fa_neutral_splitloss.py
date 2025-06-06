@@ -239,10 +239,10 @@ class CustomCLIP(nn.Module):
         logits_cache_local = logits_cache_local_forced
 
 
-        logits = logits_text + self.cfg['cache_alpha'] * logits_cache
-        logits_local = logits_local_text + self.cfg['cache_alpha'] * logits_cache_local #
+        # logits = logits_text + self.cfg['cache_alpha'] * logits_cache
+        # logits_local = logits_local_text + self.cfg['cache_alpha'] * logits_cache_local #
 
-        return logits, logits_local
+        return logits_text, logits_local_text, logits_cache, logits_cache_local
 
 
 def extract_cache_image_feature(cfg, clip_model, train_data_loader, type_str):
@@ -277,6 +277,9 @@ def extract_cache_image_feature(cfg, clip_model, train_data_loader, type_str):
 
 
     return
+
+
+
 
 
 
@@ -332,14 +335,14 @@ def main():
     cfg['template_origin_neutral'] = 'a photo of a thing that we can see in nature.'  # 
 
 
-    is_train = 0
+    is_train = 1
     is_extract_feature = 0
 
-    model_name = 'fa_taskres_tipadapter'
+    model_name = 'fa_taskres_tipadapter_splitloss'
     lrname_taskres = str(cfg['taskres_lr']).replace('.','')
     lrname_tipadapter = str(cfg['tipadapter_lr']).replace('.','')
 
-    cache_dir = os.path.join('./mycaches_new', cfg['id_dataset'], model_file_name_dict[cfg['backbone']], str(cfg['shots'])+'shots', model_name, f'ep_taskres{cfg["taskres_train_epoch"]}_tipadapter{cfg["tipadapter_train_epoch"]}', 'trainHtrm_fcacheHtrm_ocacheblur3Htrm','neutral_len'+str(origin_neutral_multiply_factor), f'lr_taskres{lrname_taskres}_tipadapter{lrname_tipadapter}','seed'+str(cfg['seed'])  )  #   
+    cache_dir = os.path.join('./mycaches_new', cfg['id_dataset'], model_file_name_dict[cfg['backbone']], str(cfg['shots'])+'shots', model_name, f'ep_taskres{cfg["taskres_train_epoch"]}_tipadapter{cfg["tipadapter_train_epoch"]}', 'trainMtrm_fcacheMtrm_ocacheblurtrm','neutral_len'+str(origin_neutral_multiply_factor), f'lr_taskres{lrname_taskres}_tipadapter{lrname_tipadapter}','seed'+str(cfg['seed'])  )  #   
 
     os.makedirs(cache_dir, exist_ok=True)
     cfg['cache_dir'] = cache_dir
@@ -399,7 +402,7 @@ def main():
         transforms.RandomGrayscale(p=0.1),
     
 
-        transforms.GaussianBlur(kernel_size=15, sigma=(2.0, 15.0)),
+        transforms.GaussianBlur(kernel_size=15, sigma=(2.0, 7.0)),
 
         transforms.ToTensor(),
         transforms.Normalize(mean=(0.48145466, 0.4578275, 0.40821073), std=(0.26862954, 0.26130258, 0.27577711))
@@ -408,9 +411,9 @@ def main():
     # train_transform_aug = preprocess
     train_transform_no_aug = preprocess
 
-    train_transform = transform_aug_H
-    cache_transform_forced = transform_aug_H
-    cache_transform_original = transform_aug_blur_H
+    train_transform = transform_aug_M
+    cache_transform_forced = transform_aug_M
+    cache_transform_original = transform_aug_blur
 
 
 
@@ -522,8 +525,8 @@ def main():
 
 
         # for tipadapter
-        optimizer_tipadapter = torch.optim.AdamW(model_stage2.module.tip_adapter.parameters(), lr=cfg['tipadapter_lr'], weight_decay=5e-4, eps=1e-4)  #
-        # optimizer_tipadapter = torch.optim.SGD(model_stage2.module.tip_adapter.parameters(), lr=cfg['tipadapter_lr'], weight_decay=5e-4, momentum=0.9, dampening=0, nesterov=False) 
+        optimizer_tipadapter = torch.optim.AdamW(model_stage2.module.tip_adapter.parameters(), lr=cfg['tipadapter_lr'], weight_decay=5e-4, eps=1e-4) 
+        # optimizer_tipadapter = torch.optim.SGD(model_stage2.module.tip_adapter.parameters(), lr=cfg['tipadapter_lr'], momentum=0.9, dampening=0, nesterov=False) 
         scheduler_tipadapter = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer_tipadapter,  cfg['tipadapter_train_epoch'] * len(train_loader))
         print('optimizer_tipadapter:', optimizer_tipadapter)
         print('scheduler_tipadapter:', scheduler_tipadapter)
@@ -542,8 +545,18 @@ def main():
             for i, (images, target) in enumerate(tqdm(train_loader)):
                 images, target = images.cuda(), target.cuda()
 
-                logits,_ = model_stage2(images)
-                loss = criterion(logits, target)
+                logits_text,_,logits_cache,_ = model_stage2(images)
+
+                loss_text = criterion(logits_text, target)
+                loss_cache = criterion(logits_cache, target)
+
+                loss = loss_text + cfg['cache_alpha'] * loss_cache
+                logits = logits_text + cfg['cache_alpha'] * logits_cache
+
+                # # check no split
+                # logits = logits_text + cfg['cache_alpha'] * logits_cache
+                # loss= criterion(logits, target)
+
                 acc = cls_acc(output=logits , target=target, topk=1)
 
                 correct_samples += acc / 100 * len(logits)
@@ -583,15 +596,19 @@ def main():
 
                     for images, labels in tqdm(test_loader):
                         images, labels = images.to(device), labels.to(device)
-                        outputs,_ = model_stage2(images)
+                        logits_text,_,logits_cache,_ = model_stage2(images)
 
-                        outputs = outputs / 100.0
-                        batch_size, repeat_len = outputs.shape
-                        outputs_temp = outputs.view(batch_size, cfg['origin_neutral_multiply_factor']+1 , len(cfg['classnames']))
-                        just_origin_outputs = outputs_temp[:,0,:]
+                        logits_text = logits_text / 100.0
+                        logits_cache = logits_cache / 100.0
+                        batch_size, repeat_len = logits_text.shape
+                        logits_text_temp = logits_text.view(batch_size, cfg['origin_neutral_multiply_factor']+1 , len(cfg['classnames']))
+                        logits_cache_temp = logits_cache.view(batch_size, cfg['origin_neutral_multiply_factor']+1 , len(cfg['classnames']))
+                        just_origin_logits_text = logits_text_temp[:,0,:]
+                        just_origin_logits_cache = logits_cache_temp[:,0,:]
+                        just_origin_logits = just_origin_logits_text + cfg['cache_alpha'] * just_origin_logits_cache
 
 
-                        pred = just_origin_outputs.topk(topk, 1, True, True)[1].t()
+                        pred = just_origin_logits.topk(topk, 1, True, True)[1].t()
                         correct = pred.eq(labels.view(1, -1).expand_as(pred))
                         acc_num = float(correct[: topk].reshape(-1).float().sum(0, keepdim=True).cpu().numpy())
                         correct_samples += acc_num
@@ -720,26 +737,39 @@ def main():
             for images, labels in tqdm(test_loader_id):
                 images, labels = images.to(device), labels.to(device)
 
-                logits_id, logits_id_local = model_stage2(images)
-                logits_id /= 100.0
-                logits_id_local /= 100.0
+                logits_id_text, logits_id_local_text, logits_id_cache, logits_id_local_cache  = model_stage2(images)
+                logits_id_text /= 100.0
+                logits_id_local_text /= 100.0
+                logits_id_cache /= 100.0
+                logits_id_local_cache /= 100.0
                 # print(logits_id.shape) # torch.Size([200, 3000])
                 # print(logits_id_local.shape) # torch.Size([200, 196, 3000])
 
 
                 # ----
-                batch_size, token_len, repeat_len = logits_id_local.shape
-                logits_id_temp = logits_id.view(batch_size, cfg['origin_neutral_multiply_factor']+1 , len(cfg['classnames']))
-                just_origin_logits_id = logits_id_temp[:,0,:]
-                # print(just_origin_logits_id.shape) # torch.Size([200, 1000])
-                # print(just_origin_logits_id[0,:10])
+                batch_size, token_len, repeat_len = logits_id_local_text.shape
+                logits_id_text_temp = logits_id_text.view(batch_size, cfg['origin_neutral_multiply_factor']+1 , len(cfg['classnames']))
+                just_origin_logits_id_text = logits_id_text_temp[:,0,:]
 
-                # print(logits_id_temp[0,1,:10]) #
-                # print(logits_id_temp[0,2,:10]) # the same
+                logits_id_cache_temp = logits_id_cache.view(batch_size, cfg['origin_neutral_multiply_factor']+1 , len(cfg['classnames']))
+                just_origin_logits_id_cache = logits_id_cache_temp[:,0,:]
 
-                logits_id_local_temp = logits_id_local.view(batch_size, token_len, cfg['origin_neutral_multiply_factor']+1 , len(cfg['classnames']))
-                just_origin_logits_id_local = logits_id_local_temp[:,:,0,:]
-                # ----
+                just_origin_logits_id = just_origin_logits_id_text + cfg['cache_alpha'] * just_origin_logits_id_cache
+
+
+
+
+                logits_id_local_text_temp = logits_id_local_text.view(batch_size, token_len, cfg['origin_neutral_multiply_factor']+1 , len(cfg['classnames']))
+                just_origin_logits_id_local_text = logits_id_local_text_temp[:,:,0,:]
+
+                logits_id_local_cache_temp = logits_id_local_cache.view(batch_size, token_len, cfg['origin_neutral_multiply_factor']+1 , len(cfg['classnames']))
+                just_origin_logits_id_local_cache = logits_id_local_cache_temp[:,:,0,:]
+
+                just_origin_logits_id_local = just_origin_logits_id_local_text + cfg['cache_alpha'] * just_origin_logits_id_local_cache
+
+
+                logits_id = logits_id_text + cfg['cache_alpha'] * logits_id_cache
+                logits_id_local = logits_id_local_text + cfg['cache_alpha'] * logits_id_local_cache
 
 
 
@@ -812,11 +842,16 @@ def main():
                 for images, _ in tqdm(ood_loader):
                     images = images.to(device)
 
-                    logits_ood, logits_ood_local = model_stage2(images)
-                    logits_ood /= 100.0
-                    logits_ood_local /= 100.0
+                    logits_ood_text, logits_ood_local_text, logits_ood_cache, logits_ood_local_cache = model_stage2(images)
+                    logits_ood_text /= 100.0
+                    logits_ood_local_text /= 100.0
+                    logits_ood_cache /= 100.0
+                    logits_ood_local_cache /= 100.0
                     # print(logits_ood.shape)
                     # print(logits_ood_local.shape)
+
+                    logits_ood = logits_ood_text + cfg['cache_alpha'] * logits_ood_cache
+                    logits_ood_local = logits_ood_local_text + cfg['cache_alpha'] * logits_ood_local_cache
 
                     
 
