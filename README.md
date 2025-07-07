@@ -1,4 +1,4 @@
-# FA: Forced prompt leArning of Vision-Language Models for Out-of-Distribution Detection
+# FA: Forced Prompt Learning of Vision-Language Models for Out-of-Distribution Detection
 The paper has been accepted by ICCV2025
 
 
