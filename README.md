@@ -4,7 +4,7 @@ Arxiv: https://arxiv.org/abs/2507.04511
 
 ## Requirements
 #### Installation
-Create a conda environment and install dependencies (you do not need to install the "awesome" toolbox Dassl.pytorch first):
+Create a conda environment and install dependencies (you do not need to install the toolbox Dassl.pytorch first):
 ```bash
 pip install -r requirements.txt
 ```
