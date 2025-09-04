@@ -1,4 +1,5 @@
 from tqdm import tqdm
+import sys
 
 import torch
 import torch.nn.functional as F
@@ -6,6 +7,22 @@ import torch.nn as nn
 
 import clip
 from PIL import Image
+
+
+
+class Logger(object):
+    def __init__(self, filename='default.log', stream=sys.stdout):
+        self.terminal = stream
+        # print("filename:", filename)
+        self.filename = filename
+
+    def write(self, message):
+        with open(self.filename, 'a+') as log:
+            self.terminal.write(message)
+            log.write(message)
+
+    def flush(self):
+        pass
 
 def trm_single_image(image_path, transforms):
     image = Image.open(image_path).convert('RGB')

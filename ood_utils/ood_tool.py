@@ -5,50 +5,6 @@ from sklearn import metrics
 import sklearn.metrics as sk
 
 
-# 真阳率在0.95
-def num_fp_at_recall(ind_conf, ood_conf, tpr):
-    num_ind = len(ind_conf)
-
-    if num_ind == 0 and len(ood_conf) == 0:
-        return 0, 0.
-    if num_ind == 0:
-        return 0, np.max(ood_conf) + 1
-
-    recall_num = int(np.floor(tpr * num_ind))
-    thresh = np.sort(ind_conf)[-recall_num]# 倒数第几个数
-    num_fp = np.sum(ood_conf >= thresh)
-    return num_fp, thresh
-
-def fpr_recall(ind_conf, ood_conf, tpr):
-    num_fp, thresh = num_fp_at_recall(ind_conf, ood_conf, tpr)
-    num_ood = len(ood_conf)
-    fpr = num_fp / max(1, num_ood)
-    return fpr, thresh
-
-def auc(ind_conf, ood_conf):#OOD的AUC计算方法
-    conf = np.concatenate((ind_conf, ood_conf))# idscore与oodscore进行concat
-    ind_indicator = np.concatenate((np.ones_like(ind_conf), np.zeros_like(ood_conf)))#产生一个对于id是1od是0的维度相同的向量z(即id为1，od为0)
-
-    fpr, tpr, _ = metrics.roc_curve(ind_indicator, conf)#假阳率 真阳率 _为阈值  roc_curve's input: (y_true, y_score)
-    precision_in, recall_in, _ = metrics.precision_recall_curve(
-        ind_indicator, conf)
-    precision_out, recall_out, _ = metrics.precision_recall_curve(
-        1 - ind_indicator, 1 - conf)
-
-    auroc = metrics.auc(fpr, tpr)
-    aupr_in = metrics.auc(recall_in, precision_in)# 精确率，召回率组成的曲线下面积
-    aupr_out = metrics.auc(recall_out, precision_out)
-
-    return auroc, aupr_in, aupr_out
-
-
-
-
-
-
-
-
-
 
 
 def stable_cumsum(arr, rtol=1e-05, atol=1e-08):

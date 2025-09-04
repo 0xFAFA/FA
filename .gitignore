@@ -1,7 +1,2 @@
 # 忽略嵌套的 git 仓库
-BiomedCLIP-PubMedBERT_256-vit_base_patch16_224/
-BiomedNLP-BiomedBERT-base-uncased-abstract-fulltext/
-mycaches_new/
-mycaches_id/
-nouse-mycaches/
-test_bio_img/
+mycaches/

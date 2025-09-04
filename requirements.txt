@@ -1,0 +1,10 @@
+pyyaml
+tqdm
+ftfy
+regex
+gdown
+scipy
+scikit-learn
+torch
+torchvision
+torchaudio
