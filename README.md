@@ -1,5 +1,5 @@
 # FA: Forced Prompt Learning of Vision-Language Models for Out-of-Distribution Detection
-![FA framework](framework.png)
+![FA framework](framework.jpeg)
 The paper has been accepted by ICCV2025  
 Arxiv: https://arxiv.org/abs/2507.04511
 
@@ -9,4 +9,16 @@ Create a conda environment and install dependencies (you do not need to install 
 ```bash
 pip install -r requirements.txt
 ```
+
+## Get Started
+### Configs
+The running configurations can be modified in `configs/my_config.yaml`. 
+
+
+### Train
+`CUDA_VISIBLE_DEVICES=3 python main.py --config configs/my_config.yaml --is_train 1`
+
+### Inference
+`CUDA_VISIBLE_DEVICES=2 python main.py --config configs/my_config.yaml --is_train 0`
+
 

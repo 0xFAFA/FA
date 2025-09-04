@@ -2,8 +2,8 @@
 import os
 import sys
 
-os.environ["CUDA_VISIBLE_DEVICES"] = '2'
-is_train = 0
+# os.environ["CUDA_VISIBLE_DEVICES"] = '0'
+# is_train = 0
 
 import random
 import argparse
@@ -26,8 +26,8 @@ import clip
 from model import CustomCLIP 
 
 
-from mydataset import build_dataset
-from mydataset.utils import build_data_loader
+from my_dataset import build_dataset
+from my_dataset.utils import build_data_loader
 
 from ood_utils.ood_tool import get_measures
 
@@ -38,7 +38,8 @@ from ood_utils.ood_tool import get_measures
 def get_arguments():
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config', type=str, default="configs/myconfig.yaml", help='settings in yaml format')
+    parser.add_argument('--config', type=str, default="configs/my_config.yaml", help='settings in yaml format')
+    parser.add_argument('--is_train', type=int, default=1, help='1 train 0 test' )
     args = parser.parse_args()
 
     return args
@@ -53,9 +54,9 @@ def main():
     # Load config file
     args = get_arguments()
     assert (os.path.exists(args.config))
-    
     cfg = yaml.load(open(args.config, 'r'), Loader=yaml.Loader)
     cfg['device'] = device
+    cfg['is_train'] = args.is_train
 
     # CLIP 
     clip_model, preprocess = clip.load(cfg['backbone'])
@@ -85,7 +86,7 @@ def main():
     lr_name = str(cfg['lr']).replace('.','')
 
     model_name = 'FA'
-    cache_dir = os.path.join('./mycaches', cfg['id_dataset'], model_file_name_dict[cfg['backbone']], str(cfg['shots'])+'shots',model_name+'_efficient_batchs'+str(cfg['fine_tune_batch_size'])+'_ep'+str(cfg['fine_tune_train_epoch'])+'','K-'+str(K_name),'lr'+lr_name,'seed'+str(cfg['seed'])  )  #   
+    cache_dir = os.path.join('./my_caches', cfg['id_dataset'], model_file_name_dict[cfg['backbone']], str(cfg['shots'])+'shots',model_name+'_efficient_batchs'+str(cfg['fine_tune_batch_size'])+'_ep'+str(cfg['fine_tune_train_epoch'])+'','K-'+str(K_name),'lr'+lr_name,'seed'+str(cfg['seed'])  )  #   
 
     os.makedirs(cache_dir, exist_ok=True)
     cfg['cache_dir'] = cache_dir
@@ -116,7 +117,7 @@ def main():
 
     
 
-    if is_train == 1:
+    if cfg['is_train'] == 1:
         sys.stdout = Logger( os.path.join(cache_dir,'log_train.txt') ,  stream=sys.stdout)
         print("\nRunning configs.")
         print(cfg, "\n")
@@ -424,5 +425,4 @@ def main():
             print(f'Average AUROC_glmcm: {avg_auroc_gl:.4f}, Average AUPR_glmcm: {avg_aupr_gl:.4f}, Average FPR(0.95)_glmcm: {avg_fpr_gl:.4f}')
             
 if __name__ == '__main__':
-    # python mymain.py --config configs/myconfig.yaml
     main()
