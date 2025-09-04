@@ -1,5 +1,5 @@
 # FA: Forced Prompt Learning of Vision-Language Models for Out-of-Distribution Detection
-![FA Method Overview](images/fa_method_overview.png)
+![FA framework](framework.png)
 The paper has been accepted by ICCV2025  
 Arxiv: https://arxiv.org/abs/2507.04511
 
