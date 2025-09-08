@@ -40,7 +40,7 @@ seed: 1
 
 shots: 16
 backbone: 'ViT-B/16'
-K: 3
+K: 2
 csc: False
 template: 'a photo of a'
 

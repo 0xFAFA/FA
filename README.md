@@ -19,7 +19,7 @@ The ID dataset configurations can be modified in `my_dataset/`.
 `CUDA_VISIBLE_DEVICES=3 python main.py --config configs/my_config.yaml --is_train 1`
 
 ### Inference
-`CUDA_VISIBLE_DEVICES=2 python main.py --config configs/my_config.yaml --is_train 0`  
+`CUDA_VISIBLE_DEVICES=1 python main.py --config configs/my_config.yaml --is_train 0`  
 The specific paths for different OOD datasets can be modified in the inference section of the `main.py` code.
 
 

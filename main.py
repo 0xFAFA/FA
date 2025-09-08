@@ -39,7 +39,7 @@ def get_arguments():
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str, default="configs/my_config.yaml", help='settings in yaml format')
-    parser.add_argument('--is_train', type=int, default=1, help='1 train 0 test' )
+    parser.add_argument('--is_train', type=int, default=1, help='1->train 0->test' )
     args = parser.parse_args()
 
     return args
