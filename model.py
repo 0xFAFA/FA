@@ -221,7 +221,7 @@ class CustomCLIP(nn.Module):
         
         self.text_features_classify_original = text_features_classify_original
         self.repeat_sum_num = repeat_sum_num
-        print(f"self.text_features_classify_original.shape: {self.text_features_classify_original.shape}")
+        # print(f"self.text_features_classify_original.shape: {self.text_features_classify_original.shape}")
 
         
     def forward(self, image):        
