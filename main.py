@@ -3,7 +3,6 @@ import os
 import sys
 
 # os.environ["CUDA_VISIBLE_DEVICES"] = '0'
-# is_train = 0
 
 import random
 import argparse

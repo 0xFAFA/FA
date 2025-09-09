@@ -36,11 +36,11 @@ ood_dataset: 'common'
 
 
 # ------ Hyperparamters ------
-seed: 1
+seed: 5
 
 shots: 16
 backbone: 'ViT-B/16'
-K: 2
+K: 3
 csc: False
 template: 'a photo of a'
 
