@@ -2,6 +2,7 @@
 # ------ root_path ------
 root_path: "/data/xinhua/Datasets"
 ood_dataset_path: "/data/xinhua/Datasets/ood-benchmark/imagenet"
+clip_model_path:"data/xinhua/.cache/clip/"
 
 # ------ id dataset------
 
