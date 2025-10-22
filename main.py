@@ -71,7 +71,7 @@ def main():
         "ViT-B/16": "ViT-B-16",
     }
 
-    model_path = os.path.join("/data/xinhua/.cache/clip/", model_file_name_dict[cfg['backbone']]+".pt" )
+    model_path = os.path.join(cfg['clip_model_path'], model_file_name_dict[cfg['backbone']]+".pt" )
     model_temp = torch.jit.load(model_path, map_location=device ).eval()
     state_dict = model_temp.state_dict()
 
