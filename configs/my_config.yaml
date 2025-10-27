@@ -37,7 +37,7 @@ ood_dataset: 'common'
 
 
 # ------ Hyperparamters ------
-seed: 5
+seed: 1
 
 shots: 16
 backbone: 'ViT-B/16'
