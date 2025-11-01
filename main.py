@@ -177,6 +177,10 @@ def main():
             print('Train Epoch: {:} / {:}'.format(train_idx, train_epoch))
 
             model.train()
+
+            if 'RN' in cfg['backbone']:
+                model.module.image_encoder.eval()
+                
             for i, (images, target) in enumerate(tqdm(train_loader)):
                 images, target = images.cuda(), target.cuda()
 
@@ -199,7 +203,7 @@ def main():
 
 
             # test
-            if  train_idx == train_epoch - 1 :   #  (train_idx + 1) % 100 == 0 or  train_idx == 0  or # 待修改为取最后一个epoch
+            if  train_idx == train_epoch - 1 :   #  (train_idx + 1) % 100 == 0 or  train_idx == 0  or 
                 model.eval()
                 with torch.no_grad():
                     correct_samples, all_samples = 0, 0
